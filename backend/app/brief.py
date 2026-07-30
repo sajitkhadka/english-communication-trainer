@@ -31,7 +31,7 @@ def load_transcript(session_id: int, path: str | Path | None = None) -> dict[str
 def _fmt_duration(seconds: float | None) -> str:
     if not seconds:
         return "?"
-    minutes, secs = divmod(int(round(seconds)), 60)
+    minutes, secs = divmod(round(seconds), 60)
     return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
 
 
@@ -46,16 +46,30 @@ def build_markdown(
     recent_scores: list[dict[str, Any]] | None = None,
     max_sentences: int | None = None,
 ) -> str:
-    word_meta = word_meta or {}
     lines: list[str] = []
-    sid = transcript.get("session_id")
+    lines += _render_header(transcript, word_meta or {})
+    lines += _render_measurements(transcript)
+    lines += _render_target_words(transcript)
+    lines += _render_transcript(transcript, max_sentences)
+    lines += _render_history(recent_scores)
+
+    meta = transcript.get("meta", {})
+    lines.append(
+        f"_Pipeline: {meta.get('model')} @ {meta.get('compute_type')}, "
+        f"aligned={meta.get('aligned')}, vad={meta.get('vad')}, "
+        f"generated {meta.get('generated_at')}_"
+    )
+    return "\n".join(lines)
+
+
+def _render_header(transcript: dict[str, Any], word_meta: dict[str, dict[str, Any]]) -> list[str]:
     mode = transcript.get("mode", "?")
     category = transcript.get("category")
 
-    header = f"# Session {sid} - {mode}"
+    header = f"# Session {transcript.get('session_id')} - {mode}"
     if category:
         header += f" (category: {category})"
-    lines += [header, ""]
+    lines = [header, ""]
     if transcript.get("topic"):
         lines.append(f"**Topic / question:** {transcript['topic']}")
 
@@ -74,8 +88,12 @@ def build_markdown(
     elif mode == "recommended":
         lines.append("**Target vocabulary:** none recorded for this session")
     lines.append("")
+    return lines
 
-    # --- measurements -------------------------------------------------------
+
+def _render_measurements(transcript: dict[str, Any]) -> list[str]:
+    """Everything the backend counted. Add new measurements here or the model will
+    never see them."""
     speech = transcript.get("speech", {})
     audio = transcript.get("audio", {})
     pauses = transcript.get("pauses", {})
@@ -83,7 +101,7 @@ def build_markdown(
     textual = fillers.get("textual", {})
     acoustic = fillers.get("acoustic", {})
 
-    lines += ["## Backend measurements", ""]
+    lines: list[str] = ["## Backend measurements", ""]
     lines.append(
         f"- **Pace:** {_fmt_duration(audio.get('duration_sec'))} of audio, "
         f"{_num(speech.get('words_total'))} words, "
@@ -124,32 +142,39 @@ def build_markdown(
         f"({_num(fillers.get('combined_total'))} total)"
     )
     lines.append("")
+    return lines
 
-    # --- target words -------------------------------------------------------
+
+def _render_target_words(transcript: dict[str, Any]) -> list[str]:
     hits = transcript.get("target_word_hits") or []
-    if hits:
-        lines += ["## Target-word usage (backend match; correctness is your call)", ""]
-        for hit in hits:
-            if hit.get("found"):
-                where = ", ".join(
-                    f"S{o['sentence'] + 1}" if o.get("sentence") is not None else "S?"
-                    for o in hit.get("occurrences", [])
-                )
-                said = {o.get("said_as") for o in hit.get("occurrences", [])}
-                lines.append(
-                    f"- `{hit['term']}` - USED {hit.get('count')}x in {where} "
-                    f"(said as: {', '.join(sorted(s for s in said if s))})"
-                )
-            else:
-                lines.append(f"- `{hit['term']}` - **NOT USED**")
-        lines.append("")
+    if not hits:
+        return []
+    lines = ["## Target-word usage (backend match; correctness is your call)", ""]
+    for hit in hits:
+        if not hit.get("found"):
+            lines.append(f"- `{hit['term']}` - **NOT USED**")
+            continue
+        where = ", ".join(
+            f"S{o['sentence'] + 1}" if o.get("sentence") is not None else "S?"
+            for o in hit.get("occurrences", [])
+        )
+        said = {o.get("said_as") for o in hit.get("occurrences", [])}
+        lines.append(
+            f"- `{hit['term']}` - USED {hit.get('count')}x in {where} "
+            f"(said as: {', '.join(sorted(s for s in said if s))})"
+        )
+    lines.append("")
+    return lines
 
-    # --- annotated transcript ----------------------------------------------
-    lines += [
+
+def _render_transcript(transcript: dict[str, Any], max_sentences: int | None) -> list[str]:
+    lines = [
         "## Transcript",
         "",
-        "Numbered sentences. `!` lines are backend measurements for that sentence, "
-        "not transcript text.",
+        (
+            "Numbered sentences. `!` lines are backend measurements for that sentence, "
+            "not transcript text."
+        ),
         "",
     ]
     sentences = transcript.get("transcript", {}).get("sentences") or []
@@ -170,23 +195,23 @@ def build_markdown(
         lines.append("")
         lines.append(transcript.get("transcript", {}).get("text", ""))
     lines.append("")
+    return lines
 
-    # --- history ------------------------------------------------------------
-    if recent_scores:
-        lines += ["## Recent overall scores (for continuity, not for grading on a curve)", ""]
-        trail = " -> ".join(
-            f"S{s['session_id']} {s['overall']}" for s in recent_scores if s.get("overall") is not None
-        )
-        lines.append(trail or "_none yet_")
-        lines.append("")
 
-    meta = transcript.get("meta", {})
-    lines.append(
-        f"_Pipeline: {meta.get('model')} @ {meta.get('compute_type')}, "
-        f"aligned={meta.get('aligned')}, vad={meta.get('vad')}, "
-        f"generated {meta.get('generated_at')}_"
+def _render_history(recent_scores: list[dict[str, Any]] | None) -> list[str]:
+    if not recent_scores:
+        return []
+    trail = " -> ".join(
+        f"S{s['session_id']} {s['overall']}"
+        for s in recent_scores
+        if s.get("overall") is not None
     )
-    return "\n".join(lines)
+    return [
+        "## Recent overall scores (for continuity, not for grading on a curve)",
+        "",
+        trail or "_none yet_",
+        "",
+    ]
 
 
 def _annotations_by_sentence(transcript: dict[str, Any], count: int) -> dict[int, list[str]]:

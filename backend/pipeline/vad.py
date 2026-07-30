@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from functools import lru_cache
+from itertools import pairwise
 
 import numpy as np
 
@@ -68,11 +69,7 @@ def silence_spans(spans: list[Span]) -> list[Span]:
     air around the answer, not hesitation inside it."""
     if not spans:
         return []
-    gaps: list[Span] = []
-    for prev, nxt in zip(spans, spans[1:]):
-        if nxt.start > prev.end:
-            gaps.append(Span(prev.end, nxt.start))
-    return gaps
+    return [Span(prev.end, nxt.start) for prev, nxt in pairwise(spans) if nxt.start > prev.end]
 
 
 def voiced_seconds(spans: list[Span]) -> float:

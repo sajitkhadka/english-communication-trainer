@@ -65,7 +65,7 @@ def review(
     on_date: date | None = None,
 ) -> Review:
     """Apply one SM-2 review to a word row and return its new scheduling state."""
-    today = on_date or date.today()
+    today = on_date or date.today()  # noqa: DTZ011 - local date; see db.today()
     quality = max(0, min(5, int(quality)))
 
     ease = float((word or {}).get("ease") or DEFAULT_EASE)

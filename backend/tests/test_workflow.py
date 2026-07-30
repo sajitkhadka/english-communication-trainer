@@ -207,7 +207,7 @@ class TestRecordFeedback:
     def test_rejects_out_of_range_scores(self, services, recorded):
         payload = self.base_payload(recorded)
         payload["scores"]["grammar"] = 11.0
-        with pytest.raises(services.WorkflowError, match="outside 0..10"):
+        with pytest.raises(services.WorkflowError, match=r"outside 0\.\.10"):
             services.record_feedback(payload)
 
     def test_rejects_a_payload_with_no_scores_key(self, services, recorded):

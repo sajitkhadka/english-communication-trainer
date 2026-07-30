@@ -238,6 +238,6 @@ def _buckets(pauses: list[Any]) -> dict[str, int]:
 
 
 def _now() -> str:
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")

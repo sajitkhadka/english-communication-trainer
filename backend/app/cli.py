@@ -46,7 +46,14 @@ def read_json_arg(value: str) -> Any:
 
 
 def slim(row: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
-    return {k: row.get(k) for k in keys if row.get(k) not in (None, "", 0.0) or k in ("term", "mastery")}
+    """Drop empty fields to keep the JSON handed to Claude small, but always keep the
+    two that carry meaning even when zero."""
+    always = ("term", "mastery")
+    return {
+        k: row.get(k)
+        for k in keys
+        if row.get(k) not in (None, "", 0.0) or k in always
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -321,7 +328,7 @@ def cmd_suggest_add(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse setup
     parser = argparse.ArgumentParser(
         prog="ect",
         description="English Communication Trainer - backend command surface for skills.",

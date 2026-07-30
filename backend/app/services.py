@@ -65,7 +65,8 @@ def create_session(
         for term in target_words or []:
             dbmod.add_word(conn, term=term, source="recommended")
         session = dbmod.get_session(conn, session_id)
-    assert session is not None
+    if session is None:  # pragma: no cover - the row was written in this transaction
+        raise WorkflowError(f"session {session_id} vanished immediately after creation")
     if write_prompt:
         write_prompt_file(session)
     return session
@@ -134,7 +135,8 @@ def store_recording(session_id: int, data: bytes, *, suffix: str = ".webm") -> d
             duration_sec=duration_of(path),
         )
         session = dbmod.get_session(conn, session_id)
-    assert session is not None
+    if session is None:  # pragma: no cover - checked at the top of this function
+        raise WorkflowError(f"session {session_id} disappeared while storing audio")
     return session
 
 
@@ -286,79 +288,11 @@ def record_feedback(payload: dict[str, Any], *, markdown: str | None = None) -> 
             scores.pop("target_usage", None)  # N/A (PRD 9)
 
         summary["overall"] = dbmod.insert_score(conn, session_id, scores)
-
-        # --- target-word review outcomes -> SM-2 ---
-        for entry in payload.get("target_words") or []:
-            term = str(entry.get("term", "")).strip()
-            if not term:
-                continue
-            used = bool(entry.get("used"))
-            correct = bool(entry.get("used_correctly"))
-            quality = entry.get("quality")
-            quality = int(quality) if quality is not None else srs.grade_from_usage(used, correct)
-
-            word_id = dbmod.add_word(
-                conn, term=term, source="recommended", notes=entry.get("note")
-            )
-            word = conn.execute("SELECT * FROM words WHERE id = ?", (word_id,)).fetchone()
-            state = srs.review(dict(word), quality)
-            conn.execute(
-                """UPDATE words
-                      SET times_seen = times_seen + 1,
-                          times_used_correctly = times_used_correctly + ?,
-                          last_practiced = ?,
-                          ease = ?, interval_days = ?, repetitions = ?,
-                          due_date = ?, mastery = ?,
-                          notes = COALESCE(?, notes)
-                    WHERE id = ?""",
-                (
-                    1 if correct else 0,
-                    dbmod.today(),
-                    state.ease,
-                    state.interval_days,
-                    state.repetitions,
-                    state.due_date,
-                    state.mastery,
-                    entry.get("note"),
-                    word_id,
-                ),
-            )
-            dbmod.record_word_usage(
-                conn, word_id=word_id, session_id=session_id, used=used, used_correctly=correct
-            )
-            summary["words_updated"].append(
-                {"term": term, "quality": quality, "due": state.due_date,
-                 "mastery": state.mastery}
-            )
-
-        # --- newly harvested vocabulary ---
-        for entry in payload.get("new_words") or []:
-            term = str(entry.get("term", "")).strip()
-            if not term:
-                continue
-            dbmod.add_word(
-                conn,
-                term=term,
-                kind=entry.get("kind"),
-                meaning=entry.get("meaning"),
-                example=entry.get("example"),
-                source=entry.get("source") or "recommended",
-                notes=entry.get("note"),
-            )
-            summary["words_added"].append(term)
-
-        # --- suggestions for next time ---
-        for entry in payload.get("suggestions") or []:
-            if not entry.get("topic"):
-                continue
-            dbmod.add_suggestion(
-                conn,
-                mode=entry.get("mode") or session["mode"],
-                topic=entry["topic"],
-                category=entry.get("category"),
-                target_words=entry.get("target_words") or [],
-                rationale=entry.get("rationale"),
-            )
+        summary["words_updated"] = _apply_reviews(
+            conn, session_id, payload.get("target_words") or []
+        )
+        summary["words_added"] = _apply_new_words(conn, payload.get("new_words") or [])
+        _apply_suggestions(conn, session["mode"], payload.get("suggestions") or [])
 
         path = feedback_path(session_id)
         if markdown is not None:
@@ -377,3 +311,81 @@ def record_feedback(payload: dict[str, Any], *, markdown: str | None = None) -> 
     summary["status"] = "processed"
     summary["feedback_path"] = relpath(feedback_path(session_id))
     return summary
+
+
+def _apply_reviews(conn, session_id: int, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One SM-2 review per target word. Claude judged the usage; the schedule is ours."""
+    updated: list[dict[str, Any]] = []
+    for entry in entries:
+        term = str(entry.get("term", "")).strip()
+        if not term:
+            continue
+        used = bool(entry.get("used"))
+        correct = bool(entry.get("used_correctly"))
+        quality = entry.get("quality")
+        quality = int(quality) if quality is not None else srs.grade_from_usage(used, correct)
+
+        word_id = dbmod.add_word(conn, term=term, source="recommended", notes=entry.get("note"))
+        word = conn.execute("SELECT * FROM words WHERE id = ?", (word_id,)).fetchone()
+        state = srs.review(dict(word), quality)
+        conn.execute(
+            """UPDATE words
+                  SET times_seen = times_seen + 1,
+                      times_used_correctly = times_used_correctly + ?,
+                      last_practiced = ?,
+                      ease = ?, interval_days = ?, repetitions = ?,
+                      due_date = ?, mastery = ?,
+                      notes = COALESCE(?, notes)
+                WHERE id = ?""",
+            (
+                1 if correct else 0,
+                dbmod.today(),
+                state.ease,
+                state.interval_days,
+                state.repetitions,
+                state.due_date,
+                state.mastery,
+                entry.get("note"),
+                word_id,
+            ),
+        )
+        dbmod.record_word_usage(
+            conn, word_id=word_id, session_id=session_id, used=used, used_correctly=correct
+        )
+        updated.append(
+            {"term": term, "quality": quality, "due": state.due_date, "mastery": state.mastery}
+        )
+    return updated
+
+
+def _apply_new_words(conn, entries: list[dict[str, Any]]) -> list[str]:
+    added: list[str] = []
+    for entry in entries:
+        term = str(entry.get("term", "")).strip()
+        if not term:
+            continue
+        dbmod.add_word(
+            conn,
+            term=term,
+            kind=entry.get("kind"),
+            meaning=entry.get("meaning"),
+            example=entry.get("example"),
+            source=entry.get("source") or "recommended",
+            notes=entry.get("note"),
+        )
+        added.append(term)
+    return added
+
+
+def _apply_suggestions(conn, default_mode: str, entries: list[dict[str, Any]]) -> None:
+    for entry in entries:
+        if not entry.get("topic"):
+            continue
+        dbmod.add_suggestion(
+            conn,
+            mode=entry.get("mode") or default_mode,
+            topic=entry["topic"],
+            category=entry.get("category"),
+            target_words=entry.get("target_words") or [],
+            rationale=entry.get("rationale"),
+        )

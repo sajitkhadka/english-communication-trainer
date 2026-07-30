@@ -55,3 +55,32 @@ filterwarnings = ["ignore::DeprecationWarning"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+# Pinned explicitly: ruff's default rule set widens between releases, and a lint
+# command that changes meaning on upgrade is not worth running.
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "PL", "S", "BLE", "DTZ", "ISC"]
+ignore = [
+    # The pipeline crosses two boundaries where any exception must degrade rather than
+    # propagate: model loading walks a compute-type fallback ladder, and the VAD and
+    # alignment stages are accuracy upgrades whose failure must not lose a recording.
+    # Each site logs what it swallowed.
+    "BLE001",  # blind-except
+    "S110",    # try-except-pass
+    "S112",    # try-except-continue
+    # torch, whisperx and silero are imported inside the functions that use them, on
+    # purpose: at module level, `ect db init` would load ~2 GB of CUDA libraries before
+    # touching the database, and the tests could not run without the GPU stack present.
+    "PLC0415", # import not at top of file
+    # Every subprocess call is ffmpeg, invoked with an argument list and no shell.
+    "S603",    # subprocess call
+    "PLR0913", # many arguments - the payload builders genuinely take that many
+    "PLR2004", # magic values - thresholds read better inline than as constants
+]
+
+[tool.ruff.lint.per-file-ignores]
+# `File(...)` / `Query(...)` in defaults is the FastAPI dependency idiom.
+"app/routers/*.py" = ["B008"]
+# Tests import inside fixtures on purpose: `settings` is redirected to a temp
+# directory before the app modules that read it are imported.
+"tests/*.py" = ["S101", "PLC0415", "I001"]

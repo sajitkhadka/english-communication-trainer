@@ -66,7 +66,11 @@ def _compute_ladder(preferred: str) -> list[str]:
     return COMPUTE_FALLBACKS.get(preferred, [preferred, "int8"])
 
 
-def load_asr(model_name: str | None = None, compute_type: str | None = None, device: str | None = None):
+def load_asr(
+    model_name: str | None = None,
+    compute_type: str | None = None,
+    device: str | None = None,
+):
     """Load (and cache) the faster-whisper pipeline, degrading precision on OOM."""
     prepare_cuda_dlls()
     import whisperx

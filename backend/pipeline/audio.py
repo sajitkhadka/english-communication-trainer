@@ -43,7 +43,7 @@ def load_audio(path: Path | str, sr: int = SAMPLE_RATE) -> np.ndarray:
         "-f", "s16le", "-ac", "1", "-acodec", "pcm_s16le", "-ar", str(sr),
         "-",
     ]  # fmt: skip
-    proc = subprocess.run(cmd, capture_output=True)
+    proc = subprocess.run(cmd, capture_output=True, check=False)
     if proc.returncode != 0:
         tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-4:]
         raise AudioError(f"ffmpeg failed to decode {path.name}: {' | '.join(tail)}")
@@ -62,6 +62,7 @@ def duration_of(path: Path | str) -> float | None:
         [probe, "-v", "error", "-show_entries", "format=duration",
          "-of", "json", str(path)],
         capture_output=True,
+        check=False,
     )  # fmt: skip
     if proc.returncode != 0:
         return None
@@ -80,6 +81,7 @@ def to_wav(src: Path | str, dest: Path | str, sr: int = SAMPLE_RATE) -> Path:
         [_ffmpeg(), "-nostdin", "-y", "-i", str(src),
          "-ac", "1", "-ar", str(sr), "-c:a", "pcm_s16le", str(dest)],
         capture_output=True,
+        check=False,
     )  # fmt: skip
     if proc.returncode != 0:
         tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-4:]

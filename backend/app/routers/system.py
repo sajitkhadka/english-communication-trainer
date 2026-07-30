@@ -83,5 +83,7 @@ def use_suggestion(session_id: int, suggestion_id: int) -> Any:
         row = conn.execute("SELECT id FROM suggestions WHERE id = ?", (suggestion_id,)).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="suggestion not found")
-        conn.execute("UPDATE suggestions SET consumed_by = ? WHERE id = ?", (session_id, suggestion_id))
+        conn.execute(
+            "UPDATE suggestions SET consumed_by = ? WHERE id = ?", (session_id, suggestion_id)
+        )
     return {"suggestion_id": suggestion_id, "consumed_by": session_id}

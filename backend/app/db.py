@@ -6,7 +6,7 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -40,11 +40,13 @@ SCORE_WEIGHTS = {
 
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def today() -> str:
-    return date.today().isoformat()
+    # Local date, deliberately. Review scheduling should follow the user's day, not
+    # UTC's - practising at 11pm must not land the next review on "tomorrow" already.
+    return date.today().isoformat()  # noqa: DTZ011
 
 
 def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
@@ -176,9 +178,11 @@ def update_session(conn: sqlite3.Connection, session_id: int, **fields: Any) -> 
         return
     if isinstance(fields.get("target_words"), list):
         fields["target_words"] = json.dumps(fields["target_words"])
+    # Column names come from the `allowed` set above, never from the caller's data;
+    # every value is still bound as a parameter.
     assignments = ", ".join(f"{k} = ?" for k in fields)
     conn.execute(
-        f"UPDATE sessions SET {assignments} WHERE id = ?",
+        f"UPDATE sessions SET {assignments} WHERE id = ?",  # noqa: S608
         [*fields.values(), session_id],
     )
 
@@ -308,7 +312,9 @@ def list_words(
         "alpha": "lower(term) ASC",
         "due": "due_date ASC",
     }.get(sort, "id DESC")
-    rows = conn.execute(f"SELECT * FROM words ORDER BY {order} LIMIT ?", (limit,))
+    # `order` is one of the literals above - an unrecognised `sort` falls back rather
+    # than reaching the query.
+    rows = conn.execute(f"SELECT * FROM words ORDER BY {order} LIMIT ?", (limit,))  # noqa: S608
     return [dict(r) for r in rows]
 
 
@@ -322,7 +328,8 @@ def word_stats(conn: sqlite3.Connection) -> dict[str, Any]:
              FROM words""",
         (today(),),
     ).fetchone()
-    stats = {k: (row[k] or 0) for k in row.keys()}
+    # sqlite3.Row yields values when iterated, so .keys() is required here.
+    stats = {k: (row[k] or 0) for k in row.keys()}  # noqa: SIM118
     stats["avg_mastery"] = round(float(stats["avg_mastery"] or 0), 3)
     return stats
 
@@ -376,7 +383,9 @@ def add_suggestion(
     return int(cur.lastrowid)
 
 
-def list_suggestions(conn: sqlite3.Connection, *, include_used: bool = False) -> list[dict[str, Any]]:
+def list_suggestions(
+    conn: sqlite3.Connection, *, include_used: bool = False
+) -> list[dict[str, Any]]:
     sql = "SELECT * FROM suggestions"
     if not include_used:
         sql += " WHERE consumed_by IS NULL"
