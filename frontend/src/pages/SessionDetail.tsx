@@ -41,7 +41,11 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
     setError(null);
     try {
       const result = await api.process(sessionId);
-      if (result.transcription_error) setError(`Transcription failed: ${result.transcription_error}`);
+      if (result.transcription_error) {
+        setError(`Transcription failed: ${result.transcription_error}`);
+      } else if (!result.queued) {
+        setError(result.hint);
+      }
       session.reload();
       transcript.reload();
       onQueueChange();
@@ -89,7 +93,7 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
           <StatusPill status={data.status} />
           {(data.status === "recorded" || data.status === "processed") && (
             <button className="primary" onClick={queueForClaude} disabled={busy}>
-              {busy ? "Queueing…" : data.status === "processed" ? "Re-queue" : "Process"}
+              {busy ? "Transcribing…" : data.status === "processed" ? "Re-queue" : "Process"}
             </button>
           )}
           <button className="danger" onClick={remove}>

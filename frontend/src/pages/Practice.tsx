@@ -16,6 +16,7 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
   const [error, setError] = useState<string | null>(null);
   const [topic, setTopic] = useState("");
   const [creating, setCreating] = useState(false);
+  const [queueing, setQueueing] = useState<number | null>(null);
 
   const reloadAll = () => {
     awaiting.reload();
@@ -38,13 +39,24 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
     }
   };
 
+  // Transcription is a synchronous GPU run: a second click while one is in flight
+  // starts a second WhisperX load on the same 6 GB card, so the button locks.
   const queueForClaude = async (id: number) => {
+    if (queueing !== null) return;
     setError(null);
+    setQueueing(id);
     try {
-      await api.process(id);
+      const result = await api.process(id);
+      if (result.transcription_error) {
+        setError(`Transcription failed: ${result.transcription_error}`);
+      } else if (!result.queued) {
+        setError(result.hint);
+      }
       reloadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not queue the session.");
+    } finally {
+      setQueueing(null);
     }
   };
 
@@ -158,8 +170,9 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
             <span className="muted small">{readyToProcess.length}</span>
           </div>
           <p className="card-sub">
-            Queueing transcribes the audio on the GPU and flags the session. Claude picks
-            it up when you run <code>/process-session</code>.
+            Processing transcribes the audio on the GPU first; the session is only queued
+            for Claude once the transcript is ready. Claude picks it up when you run{" "}
+            <code>/process-session</code>.
           </p>
           <div className="table-wrap">
             <table>
@@ -183,8 +196,12 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
                       <StatusPill status={session.status} />
                     </td>
                     <td>
-                      <button className="primary" onClick={() => queueForClaude(session.id)}>
-                        Process
+                      <button
+                        className="primary"
+                        onClick={() => queueForClaude(session.id)}
+                        disabled={queueing !== null}
+                      >
+                        {queueing === session.id ? "Transcribing…" : "Process"}
                       </button>
                     </td>
                   </tr>

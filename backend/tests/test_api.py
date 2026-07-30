@@ -123,7 +123,24 @@ class TestProcessQueue:
     def test_process_flags_pending_and_explains_the_handoff(self, client, recorded_id):
         body = client.post(f"/api/sessions/{recorded_id}/process").json()
         assert body["status"] == "pending"
+        assert body["queued"] is True
         assert "/process-session" in body["hint"]
+
+    def test_process_does_not_queue_when_transcription_fails(self, client, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "transcribe_on_upload", True)
+        session_id = client.post(
+            "/api/sessions", json={"mode": "freeform", "topic": "t"}
+        ).json()["id"]
+        client.post(
+            f"/api/sessions/{session_id}/recording",
+            files={"file": ("clip.webm", b"not-audio", "audio/webm")},
+        )
+        body = client.post(f"/api/sessions/{session_id}/process").json()
+        assert body["queued"] is False
+        assert body["status"] == "recorded"
+        assert client.get("/api/queue").json()["count"] == 0
 
     def test_queue_lists_it(self, client, recorded_id):
         client.post(f"/api/sessions/{recorded_id}/process")

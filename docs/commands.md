@@ -15,10 +15,15 @@ All `ect` commands run from `backend/`. `uv run ect …` and
 
 ```
 /generate-topic            ->  session created, status awaiting_recording
-    record in the frontend ->  status recorded, transcription starts
-    press Process          ->  status pending  (PRD 6.3: the frontend flags, you pull)
+    record in the frontend ->  status recorded
+    press Process          ->  transcribes, then status pending if the transcript
+                               landed  (PRD 6.3: the frontend flags, you pull)
 /process-session           ->  feedback + score written, status processed
 ```
+
+`pending` is only ever set once `data/transcripts/<id>.json` exists, so every session in
+the queue has something for Claude to read. A session whose transcription failed stays
+`recorded` and reports `queued: false`; the failure is in `transcribe_error`.
 
 ---
 

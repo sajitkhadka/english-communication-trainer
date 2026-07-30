@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -145,8 +146,31 @@ def store_recording(session_id: int, data: bytes, *, suffix: str = ".webm") -> d
 # --------------------------------------------------------------------------- #
 
 
+# One GPU, 6 GB of VRAM, and a model cache that is only checked *before* the load:
+# two concurrent runs each load their own large-v3 and the process dies natively
+# (no Python exception, so `transcribe_status` would be stuck at "running" forever).
+# FastAPI runs sync endpoints in a threadpool, so double-clicking Process is enough
+# to trigger it. The in-process lock is the real guard - the `running` flag in the DB
+# cannot be, because a crashed run leaves it set with nothing to clear it.
+_gpu_lock = threading.Lock()
+
+
 def transcribe_session(session_id: int, *, force: bool = False) -> dict[str, Any]:
-    """Run the GPU pipeline for one session. Idempotent unless `force`."""
+    """Run the GPU pipeline for one session. Idempotent unless `force`.
+
+    Refuses to start while another transcription is in flight in this process.
+    """
+    if not _gpu_lock.acquire(blocking=False):
+        raise WorkflowError(
+            "a transcription is already running - wait for it to finish, then try again"
+        )
+    try:
+        return _transcribe_session(session_id, force=force)
+    finally:
+        _gpu_lock.release()
+
+
+def _transcribe_session(session_id: int, *, force: bool = False) -> dict[str, Any]:
     with dbmod.cursor() as conn:
         session = dbmod.get_session(conn, session_id)
         if session is None:
@@ -209,11 +233,24 @@ def transcribe_session(session_id: int, *, force: bool = False) -> dict[str, Any
 # --------------------------------------------------------------------------- #
 
 
+QUEUED_HINT = (
+    "Flagged for Claude. Run `/process-session` in the Claude Code console to "
+    "generate feedback."
+)
+NOT_QUEUED_HINT = (
+    "Not queued: there is no transcript for Claude to read yet. Press Process again "
+    "once the recording is available."
+)
+
+
 def enqueue(session_id: int, *, transcribe: bool | None = None) -> dict[str, Any]:
-    """Frontend "Process" button: flag the session for the next skill run.
+    """Frontend "Process" button: transcribe, then flag for the next skill run.
 
     Transcription is backend work with no Claude involvement, so it happens here
-    rather than making the skill wait on the GPU.
+    rather than making the skill wait on the GPU. The session is only flipped to
+    `pending` once the transcript exists: "queued for Claude" has to mean Claude
+    can actually read the recording, otherwise a failed GPU run leaves a session
+    advertised in the queue that `/process-session` cannot do anything with.
     """
     from .config import settings
 
@@ -223,18 +260,33 @@ def enqueue(session_id: int, *, transcribe: bool | None = None) -> dict[str, Any
             raise WorkflowError(f"session {session_id} does not exist")
         if session["status"] == "awaiting_recording":
             raise WorkflowError(f"session {session_id} has no recording yet")
+    audio = abspath(session.get("audio_path")) or find_recording(session_id, session["mode"])
+    if audio is None or not Path(audio).is_file():
+        raise WorkflowError(f"session {session_id} has no stored audio")
+
+    should = settings.transcribe_on_upload if transcribe is None else transcribe
+    result: dict[str, Any] = {"session_id": session_id, "status": session["status"]}
+    if should and not transcript_path(session_id).is_file():
+        try:
+            result["transcription"] = transcribe_session(session_id)
+        except Exception as exc:  # leave the session un-queued; surface the failure
+            result["transcription_error"] = str(exc)
+
+    # `transcribe=False` is an explicit "queue it as it is" from a caller that knows
+    # what it is doing; otherwise a transcript is what makes the session queueable.
+    ready = transcript_path(session_id).is_file() or not should
+    result["queued"] = ready
+    if not ready:
+        result["hint"] = NOT_QUEUED_HINT
+        return result
+
+    with dbmod.cursor() as conn:
         dbmod.update_session(conn, session_id, status="pending")
     marker = queue_marker(session_id)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(dbmod.utcnow(), encoding="utf-8")
-
-    should = settings.transcribe_on_upload if transcribe is None else transcribe
-    result: dict[str, Any] = {"session_id": session_id, "status": "pending"}
-    if should and not transcript_path(session_id).is_file():
-        try:
-            result["transcription"] = transcribe_session(session_id)
-        except Exception as exc:  # keep the queue flag; surface the failure
-            result["transcription_error"] = str(exc)
+    result["status"] = "pending"
+    result["hint"] = QUEUED_HINT
     return result
 
 

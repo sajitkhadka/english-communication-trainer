@@ -200,6 +200,8 @@ export interface QueuePayload {
 export interface ProcessResponse {
   session_id: number;
   status: string;
+  /** False when transcription failed - the session stays `recorded`, not queued. */
+  queued: boolean;
   transcription?: Record<string, unknown> | null;
   transcription_error?: string | null;
   hint: string;

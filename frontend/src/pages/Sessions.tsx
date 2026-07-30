@@ -32,10 +32,16 @@ export default function Sessions({
   const [busy, setBusy] = useState<number | null>(null);
 
   const queueForClaude = async (id: number) => {
+    if (busy !== null) return;
     setBusy(id);
     setError(null);
     try {
-      await api.process(id);
+      const result = await api.process(id);
+      if (result.transcription_error) {
+        setError(`Transcription failed: ${result.transcription_error}`);
+      } else if (!result.queued) {
+        setError(result.hint);
+      }
       sessions.reload();
       onQueueChange();
     } catch (err) {
@@ -120,9 +126,9 @@ export default function Sessions({
                         <button
                           className="primary"
                           onClick={() => queueForClaude(session.id)}
-                          disabled={busy === session.id}
+                          disabled={busy !== null}
                         >
-                          {busy === session.id ? "Queueing…" : "Process"}
+                          {busy === session.id ? "Transcribing…" : "Process"}
                         </button>
                       )}
                       {session.status === "awaiting_recording" && (

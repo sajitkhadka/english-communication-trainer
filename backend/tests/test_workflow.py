@@ -96,6 +96,35 @@ class TestQueue:
         with pytest.raises(services.WorkflowError, match="no recording"):
             services.enqueue(session["id"])
 
+    def test_a_failed_transcription_leaves_the_session_unqueued(self, services, monkeypatch):
+        """"Queued for Claude" has to mean there is something for Claude to read."""
+        from app.config import settings
+        from app.paths import queue_marker
+
+        monkeypatch.setattr(settings, "transcribe_on_upload", True)
+        session = services.create_session(mode="freeform", topic="t")
+        # Not decodable audio: the pipeline fails at ffmpeg, before any model load.
+        services.store_recording(session["id"], b"not-audio", suffix=".webm")
+
+        result = services.enqueue(session["id"])
+        assert result["queued"] is False
+        assert result["status"] == "recorded"
+        assert result["transcription_error"]
+        assert not queue_marker(session["id"]).is_file()
+        assert services.pending_sessions() == []
+
+    def test_a_second_transcription_is_refused_while_one_runs(self, services):
+        """One GPU: a concurrent run used to take the whole process down with it."""
+        session = services.create_session(mode="freeform", topic="t")
+        services.store_recording(session["id"], b"not-audio", suffix=".webm")
+
+        assert services._gpu_lock.acquire(blocking=False)
+        try:
+            with pytest.raises(services.WorkflowError, match="already running"):
+                services.transcribe_session(session["id"])
+        finally:
+            services._gpu_lock.release()
+
 
 class TestRecordFeedback:
     @pytest.fixture

@@ -92,6 +92,9 @@ class SuggestionRequestCreate(BaseModel):
 class ProcessResponse(BaseModel):
     session_id: int
     status: str
+    # False when the recording could not be transcribed: the session stays `recorded`
+    # rather than claiming to be queued for a Claude run that has nothing to read.
+    queued: bool = True
     transcription: dict[str, Any] | None = None
     transcription_error: str | None = None
     hint: str = (

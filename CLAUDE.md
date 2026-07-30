@@ -92,8 +92,12 @@ Keep it that way when adding metrics.
 (`none`/`running`/`done`/`error`) because transcription runs independently of the Claude
 handoff. Do not collapse them.
 
-The frontend never calls Claude. Pressing Process sets `pending` and transcribes; the
-user runs `/process-session` themselves (`docs/adr/0003-…`). Any UI text about processing
+The frontend never calls Claude. Pressing Process transcribes and *then* sets `pending`
+— only a session with a transcript is queueable, so the queue never advertises work
+Claude cannot do; the user runs `/process-session` themselves (`docs/adr/0003-…`).
+`services.transcribe_session` holds a process-wide lock: two concurrent WhisperX loads
+do not fit in 6 GB and take the whole worker down natively, which leaves
+`transcribe_status` stuck at `running` with no exception to record. Any UI text about processing
 must stay honest about that — `ProcessResponse.hint` carries the wording.
 
 ## Conventions worth knowing before editing
