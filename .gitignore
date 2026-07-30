@@ -1,0 +1,38 @@
+# --- data (structure is tracked via .gitkeep, contents are not) ---
+# The directory re-include is required: git will not descend into an excluded
+# directory, so without it the .gitkeep negation below can never match.
+data/**
+!data/**/
+!data/**/.gitkeep
+
+# --- models / caches ---
+models/
+.cache/
+*.bin
+*.pt
+*.ct2
+
+# --- python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# --- node ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# --- env / local ---
+.env
+.env.local
+*.log
+
+# --- os / editor ---
+Thumbs.db
+.DS_Store
+.idea/

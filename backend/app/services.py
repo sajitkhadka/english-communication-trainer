@@ -1,0 +1,379 @@
+"""Workflow operations shared by the HTTP API and the `ect` CLI.
+
+The CLI path exists so the skills can work with the server stopped; the HTTP path
+exists so the frontend can drive the same transitions. Both funnel through here to
+keep one definition of each state change.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+from typing import Any
+
+from . import db as dbmod
+from . import srs
+from .paths import (
+    abspath,
+    ensure_tree,
+    feedback_path,
+    find_recording,
+    prompt_path,
+    queue_marker,
+    recording_path,
+    relpath,
+    transcript_path,
+)
+
+log = logging.getLogger(__name__)
+
+
+class WorkflowError(RuntimeError):
+    """A transition the current state does not allow."""
+
+
+# --------------------------------------------------------------------------- #
+# creating sessions / prompts
+# --------------------------------------------------------------------------- #
+
+
+def create_session(
+    *,
+    mode: str,
+    topic: str | None,
+    category: str | None = None,
+    target_words: list[str] | None = None,
+    notes: str | None = None,
+    write_prompt: bool = True,
+) -> dict[str, Any]:
+    if mode not in ("recommended", "freeform", "interview"):
+        raise WorkflowError(f"unknown mode {mode!r}")
+    if mode in ("recommended", "interview") and not topic:
+        raise WorkflowError(f"{mode} sessions need a topic")
+    ensure_tree()
+    with dbmod.cursor() as conn:
+        session_id = dbmod.create_session(
+            conn,
+            mode=mode,
+            topic=topic,
+            category=category,
+            target_words=target_words or [],
+            notes=notes,
+        )
+        # Register target words so they exist in the corpus before review scheduling.
+        for term in target_words or []:
+            dbmod.add_word(conn, term=term, source="recommended")
+        session = dbmod.get_session(conn, session_id)
+    assert session is not None
+    if write_prompt:
+        write_prompt_file(session)
+    return session
+
+
+def write_prompt_file(session: dict[str, Any]) -> Path:
+    """`data/prompts/<id>.json` - what the frontend renders before recording (PRD 7.3)."""
+    payload = {
+        "session_id": session["id"],
+        "mode": session["mode"],
+        "category": session.get("category"),
+        "topic": session.get("topic"),
+        "target_words": session.get("target_words") or [],
+        "notes": session.get("notes"),
+        "created_at": session.get("created_at"),
+    }
+    with dbmod.cursor() as conn:
+        enriched = []
+        for term in payload["target_words"]:
+            row = dbmod.get_word_by_term(conn, term)
+            enriched.append(
+                {
+                    "term": term,
+                    "kind": (row or {}).get("kind"),
+                    "meaning": (row or {}).get("meaning"),
+                    "example": (row or {}).get("example"),
+                }
+            )
+        payload["target_words_detail"] = enriched
+    path = prompt_path(session["id"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+# --------------------------------------------------------------------------- #
+# audio in
+# --------------------------------------------------------------------------- #
+
+
+def store_recording(session_id: int, data: bytes, *, suffix: str = ".webm") -> dict[str, Any]:
+    ensure_tree()
+    with dbmod.cursor() as conn:
+        session = dbmod.get_session(conn, session_id)
+        if session is None:
+            raise WorkflowError(f"session {session_id} does not exist")
+        # Replacing a recording invalidates the analysis derived from the old one.
+        for stale in (transcript_path(session_id), feedback_path(session_id)):
+            if stale.exists():
+                stale.unlink()
+        path = recording_path(session_id, session["mode"], suffix=suffix)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+        from pipeline.audio import duration_of
+
+        dbmod.update_session(
+            conn,
+            session_id,
+            audio_path=relpath(path),
+            status="recorded",
+            transcript_path=None,
+            feedback_path=None,
+            transcribe_status="none",
+            transcribe_error=None,
+            duration_sec=duration_of(path),
+        )
+        session = dbmod.get_session(conn, session_id)
+    assert session is not None
+    return session
+
+
+# --------------------------------------------------------------------------- #
+# transcription
+# --------------------------------------------------------------------------- #
+
+
+def transcribe_session(session_id: int, *, force: bool = False) -> dict[str, Any]:
+    """Run the GPU pipeline for one session. Idempotent unless `force`."""
+    with dbmod.cursor() as conn:
+        session = dbmod.get_session(conn, session_id)
+        if session is None:
+            raise WorkflowError(f"session {session_id} does not exist")
+        existing = transcript_path(session_id)
+        if existing.is_file() and not force:
+            dbmod.update_session(
+                conn,
+                session_id,
+                transcript_path=relpath(existing),
+                transcribe_status="done",
+            )
+            return {"session_id": session_id, "status": "already_transcribed",
+                    "transcript_path": relpath(existing)}
+        audio = abspath(session.get("audio_path")) or find_recording(session_id, session["mode"])
+        if audio is None or not Path(audio).is_file():
+            raise WorkflowError(f"session {session_id} has no stored audio to transcribe")
+        dbmod.update_session(conn, session_id, transcribe_status="running", transcribe_error=None)
+
+    try:
+        from pipeline.runner import run
+
+        payload = run(
+            session_id,
+            audio,
+            mode=session["mode"],
+            topic=session.get("topic"),
+            category=session.get("category"),
+            target_words=session.get("target_words") or [],
+        )
+    except Exception as exc:
+        log.exception("transcription failed for session %s", session_id)
+        with dbmod.cursor() as conn:
+            dbmod.update_session(
+                conn, session_id, transcribe_status="error", transcribe_error=str(exc)[:2000]
+            )
+        raise
+
+    with dbmod.cursor() as conn:
+        dbmod.update_session(
+            conn,
+            session_id,
+            transcript_path=relpath(transcript_path(session_id)),
+            transcribe_status="done",
+            transcribe_error=None,
+            duration_sec=payload["audio"]["duration_sec"],
+        )
+    return {
+        "session_id": session_id,
+        "status": "transcribed",
+        "transcript_path": relpath(transcript_path(session_id)),
+        "duration_sec": payload["audio"]["duration_sec"],
+        "words": payload["speech"]["words_total"],
+        "elapsed_sec": payload["meta"]["elapsed_sec"],
+    }
+
+
+# --------------------------------------------------------------------------- #
+# the queue (PRD 6.3)
+# --------------------------------------------------------------------------- #
+
+
+def enqueue(session_id: int, *, transcribe: bool | None = None) -> dict[str, Any]:
+    """Frontend "Process" button: flag the session for the next skill run.
+
+    Transcription is backend work with no Claude involvement, so it happens here
+    rather than making the skill wait on the GPU.
+    """
+    from .config import settings
+
+    with dbmod.cursor() as conn:
+        session = dbmod.get_session(conn, session_id)
+        if session is None:
+            raise WorkflowError(f"session {session_id} does not exist")
+        if session["status"] == "awaiting_recording":
+            raise WorkflowError(f"session {session_id} has no recording yet")
+        dbmod.update_session(conn, session_id, status="pending")
+    marker = queue_marker(session_id)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(dbmod.utcnow(), encoding="utf-8")
+
+    should = settings.transcribe_on_upload if transcribe is None else transcribe
+    result: dict[str, Any] = {"session_id": session_id, "status": "pending"}
+    if should and not transcript_path(session_id).is_file():
+        try:
+            result["transcription"] = transcribe_session(session_id)
+        except Exception as exc:  # keep the queue flag; surface the failure
+            result["transcription_error"] = str(exc)
+    return result
+
+
+def pending_sessions() -> list[dict[str, Any]]:
+    with dbmod.cursor() as conn:
+        return dbmod.list_sessions(conn, status="pending")
+
+
+def clear_queue_marker(session_id: int) -> None:
+    marker = queue_marker(session_id)
+    if marker.exists():
+        marker.unlink()
+
+
+# --------------------------------------------------------------------------- #
+# feedback in (the skill's write-back path)
+# --------------------------------------------------------------------------- #
+
+FEEDBACK_REQUIRED = ("session_id", "scores")
+
+
+def record_feedback(payload: dict[str, Any], *, markdown: str | None = None) -> dict[str, Any]:
+    """Apply one session's feedback: score, word usage, SM-2 updates, status.
+
+    `payload` is what `process-session` produces (see docs/commands.md). Everything
+    numeric - the weighted overall, ease factors, intervals, mastery - is computed
+    here so two runs of the skill can never disagree about the arithmetic.
+    """
+    missing = [k for k in FEEDBACK_REQUIRED if k not in payload]
+    if missing:
+        raise WorkflowError(f"feedback payload missing required keys: {missing}")
+
+    session_id = int(payload["session_id"])
+    scores = dict(payload["scores"] or {})
+    unknown = set(scores) - set(dbmod.SCORE_DIMENSIONS)
+    if unknown:
+        raise WorkflowError(f"unknown score dimensions: {sorted(unknown)}")
+    for dim, value in scores.items():
+        if value is None:
+            continue
+        if not 0 <= float(value) <= 10:
+            raise WorkflowError(f"score {dim}={value} is outside 0..10")
+
+    summary: dict[str, Any] = {"session_id": session_id, "words_updated": [], "words_added": []}
+
+    with dbmod.cursor() as conn:
+        session = dbmod.get_session(conn, session_id)
+        if session is None:
+            raise WorkflowError(f"session {session_id} does not exist")
+        if session["mode"] == "freeform":
+            scores.pop("target_usage", None)  # N/A (PRD 9)
+
+        summary["overall"] = dbmod.insert_score(conn, session_id, scores)
+
+        # --- target-word review outcomes -> SM-2 ---
+        for entry in payload.get("target_words") or []:
+            term = str(entry.get("term", "")).strip()
+            if not term:
+                continue
+            used = bool(entry.get("used"))
+            correct = bool(entry.get("used_correctly"))
+            quality = entry.get("quality")
+            quality = int(quality) if quality is not None else srs.grade_from_usage(used, correct)
+
+            word_id = dbmod.add_word(
+                conn, term=term, source="recommended", notes=entry.get("note")
+            )
+            word = conn.execute("SELECT * FROM words WHERE id = ?", (word_id,)).fetchone()
+            state = srs.review(dict(word), quality)
+            conn.execute(
+                """UPDATE words
+                      SET times_seen = times_seen + 1,
+                          times_used_correctly = times_used_correctly + ?,
+                          last_practiced = ?,
+                          ease = ?, interval_days = ?, repetitions = ?,
+                          due_date = ?, mastery = ?,
+                          notes = COALESCE(?, notes)
+                    WHERE id = ?""",
+                (
+                    1 if correct else 0,
+                    dbmod.today(),
+                    state.ease,
+                    state.interval_days,
+                    state.repetitions,
+                    state.due_date,
+                    state.mastery,
+                    entry.get("note"),
+                    word_id,
+                ),
+            )
+            dbmod.record_word_usage(
+                conn, word_id=word_id, session_id=session_id, used=used, used_correctly=correct
+            )
+            summary["words_updated"].append(
+                {"term": term, "quality": quality, "due": state.due_date,
+                 "mastery": state.mastery}
+            )
+
+        # --- newly harvested vocabulary ---
+        for entry in payload.get("new_words") or []:
+            term = str(entry.get("term", "")).strip()
+            if not term:
+                continue
+            dbmod.add_word(
+                conn,
+                term=term,
+                kind=entry.get("kind"),
+                meaning=entry.get("meaning"),
+                example=entry.get("example"),
+                source=entry.get("source") or "recommended",
+                notes=entry.get("note"),
+            )
+            summary["words_added"].append(term)
+
+        # --- suggestions for next time ---
+        for entry in payload.get("suggestions") or []:
+            if not entry.get("topic"):
+                continue
+            dbmod.add_suggestion(
+                conn,
+                mode=entry.get("mode") or session["mode"],
+                topic=entry["topic"],
+                category=entry.get("category"),
+                target_words=entry.get("target_words") or [],
+                rationale=entry.get("rationale"),
+            )
+
+        path = feedback_path(session_id)
+        if markdown is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(markdown, encoding="utf-8")
+
+        dbmod.update_session(
+            conn,
+            session_id,
+            status="processed",
+            processed_at=dbmod.utcnow(),
+            feedback_path=relpath(path) if path.is_file() else None,
+        )
+
+    clear_queue_marker(session_id)
+    summary["status"] = "processed"
+    summary["feedback_path"] = relpath(feedback_path(session_id))
+    return summary
