@@ -36,17 +36,23 @@ The frontend never calls Claude. It flags intent; you pull the trigger in the co
 ## Quick start
 
 ```bash
-# backend
+# one-time setup
 cd backend
 uv sync --extra dev
 uv run ect db init
 uv run ect doctor                       # GPU + ffmpeg + db check
-uv run uvicorn app.main:app --reload --port 8000
+cd ../frontend && npm install
 
-# frontend (second terminal)
-cd frontend
-npm install
-npm run dev                             # http://localhost:5173
+# every day: both servers, one command, Ctrl+C stops both
+cd .. && ./dev.ps1                      # API :8000, frontend http://localhost:5173
+```
+
+`./dev.ps1 -Port 8080` moves the API and the frontend's proxy together. To run the
+halves separately (two terminals):
+
+```bash
+cd backend  && uv run uvicorn app.main:app --reload --port 8000
+cd frontend && npm run dev
 ```
 
 Full prerequisites, model sizes, VRAM fallbacks and troubleshooting:

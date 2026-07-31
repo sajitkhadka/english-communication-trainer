@@ -37,6 +37,11 @@ Run the API:
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
+Or `./dev.ps1` from the repo root, which runs the API and the frontend together and
+stops both on Ctrl+C. It refuses to start when the API port is already served and warns
+when 5173 is, so a leftover server from an earlier run cannot quietly serve you stale
+code.
+
 `http://127.0.0.1:8000/docs` for the OpenAPI browser.
 
 ## Frontend

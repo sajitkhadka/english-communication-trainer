@@ -24,9 +24,14 @@ uv run ruff check .
 uv run ruff format .
 
 # servers
-uv run uvicorn app.main:app --reload --port 8000     # API + /docs
+./dev.ps1                                            # both, from the repo root (Ctrl+C stops both)
+uv run uvicorn app.main:app --reload --port 8000     # API + /docs, on its own
 cd ../frontend && npm run dev                        # :5173, proxies /api to :8000
 ```
+
+`dev.ps1` refuses to start if the API port is already served and warns if 5173 is — a
+stale server from an earlier run is otherwise invisible until the UI shows stale data.
+It passes `ECT_API_PORT` to Vite, so `-Port` moves both halves together.
 
 Frontend (`frontend/`): `npm run typecheck` (strict, `noUnusedLocals`), `npm run build`
 (runs `tsc -b` then Vite). There is no frontend test suite.
