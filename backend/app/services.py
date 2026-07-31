@@ -361,7 +361,11 @@ def record_feedback(payload: dict[str, Any], *, markdown: str | None = None) -> 
 
     clear_queue_marker(session_id)
     summary["status"] = "processed"
-    summary["feedback_path"] = relpath(feedback_path(session_id))
+    stored = feedback_path(session_id)
+    # None, not the path it would have had: the frontend renders whatever is on disk, so
+    # reporting a path for a file that was never written hides the fact that the session
+    # is processed with no feedback to show.
+    summary["feedback_path"] = relpath(stored) if stored.is_file() else None
     return summary
 
 

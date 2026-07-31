@@ -58,7 +58,15 @@ scores comparable across sessions.
 
 ## 4. Write the feedback
 
-Write markdown **directly to `data/feedback/<id>.md`** with these sections, in order:
+Write the markdown to a **scratch file** (anywhere - a temp path is fine) and hand it to
+the backend with `--markdown` in step 6. The backend owns the canonical location and
+copies it to `data/feedback/<id>.md` itself.
+
+Do **not** write into `data/` yourself. Commands here run from `backend/`, so a relative
+`data/feedback/<id>.md` lands in `backend/data/` - the frontend reads the repo-root path,
+finds nothing, and shows "No feedback yet" on a session that says `processed`.
+
+The file has these sections, in order:
 
 1. **Snapshot** - two or three lines: duration, wpm, filler rate, what stood out.
 2. **Fillers & hesitation** - work from both layers. Textual fillers are in the
@@ -125,7 +133,7 @@ does all the arithmetic: weighted overall, SM-2 ease/interval/due dates, mastery
 ```
 
 ```bash
-uv run ect feedback apply --json /path/to/payload.json
+uv run ect feedback apply --json /path/to/payload.json --markdown /path/to/feedback.md
 ```
 
 Rules for the payload:
@@ -141,8 +149,10 @@ Rules for the payload:
   `target_words` with a `note` rather than to `new_words` - that is what resurfaces it.
 - `suggestions` is optional; it populates the frontend's Suggestions page.
 
-Writing the markdown to `data/feedback/<id>.md` before this call is what links the file
-to the session and flips its status to `processed`.
+This call stores the markdown at `data/feedback/<id>.md`, links it to the session and
+flips the status to `processed`. It refuses to run without markdown - if it reports
+"no feedback markdown for session <id>", the `--markdown` path was wrong; fix it and
+re-run rather than applying the payload alone.
 
 ## 7. Update the profile (every run, no separate command)
 

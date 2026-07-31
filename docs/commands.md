@@ -105,13 +105,18 @@ uv run ect session pending
 ### Feedback write-back
 
 ```bash
-uv run ect feedback apply --json payload.json [--markdown path/to/feedback.md]
+uv run ect feedback apply --json payload.json --markdown path/to/feedback.md
 ```
 
 Applies one session's analysis. Everything numeric happens here, never in the model:
-the weighted `overall`, SM-2 ease/interval/due dates, and derived mastery. Writing
-`data/feedback/<id>.md` before the call is what links the file and flips the status to
-`processed`.
+the weighted `overall`, SM-2 ease/interval/due dates, and derived mastery. The markdown
+is copied to `data/feedback/<id>.md` — the canonical path is the backend's to decide, so
+`--markdown` can point anywhere. That is what links the file to the session and flips the
+status to `processed`.
+
+`--markdown` may only be omitted when `data/feedback/<id>.md` already exists (a re-apply);
+otherwise the command errors rather than marking a session `processed` with no feedback
+for the frontend to render.
 
 Payload:
 

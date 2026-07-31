@@ -56,6 +56,24 @@ export function useInterval(fn: () => void, ms: number | null) {
   }, [ms]);
 }
 
+/** Call `fn` whenever the tab regains focus. `/process-session` runs in a terminal, so
+ *  switching back to the browser is exactly the moment the page is out of date. */
+export function useRefreshOnFocus(fn: () => void) {
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === "visible") fnRef.current();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, []);
+}
+
 export function useDocumentTitle(title: string) {
   useEffect(() => {
     document.title = `${title} · English Communication Trainer`;

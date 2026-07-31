@@ -107,7 +107,9 @@ must stay honest about that — `ProcessResponse.hint` carries the wording.
   `tests/conftest.py`. Every path in the app derives from `settings`, so nothing else
   needs to change.
 - **Paths are stored relative to the repo root** via `paths.relpath` / `abspath`, so the
-  DB stays portable. Do not store absolute paths.
+  DB stays portable. Do not store absolute paths. Skills run from `backend/`, so a
+  relative `data/…` in a skill resolves to `backend/data/` — always let the backend
+  resolve paths (`ect feedback apply --markdown …`) rather than writing into `data/`.
 - **Audio decoding goes through ffmpeg** (`pipeline/audio.py`), never torchaudio — the
   browser uploads webm/opus or mp4, and the installed torchcodec backend does not work
   on Windows. A `torchcodec` import warning is expected and harmless.

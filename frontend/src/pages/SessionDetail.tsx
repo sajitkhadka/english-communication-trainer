@@ -15,7 +15,7 @@ import {
   formatDate,
   formatDuration,
 } from "../components/common";
-import { useAsync, useDocumentTitle } from "../hooks";
+import { useAsync, useDocumentTitle, useRefreshOnFocus } from "../hooks";
 import type { Score } from "../types";
 
 export default function SessionDetail({ onQueueChange }: { onQueueChange: () => void }) {
@@ -33,6 +33,14 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
   const [busy, setBusy] = useState(false);
 
   useDocumentTitle(session.data?.topic ?? `Session ${sessionId}`);
+
+  // Feedback arrives while the user is in the Claude Code console, not in the browser,
+  // so refetch on return rather than making them reload the page by hand.
+  useRefreshOnFocus(() => {
+    session.reload();
+    transcript.reload();
+    onQueueChange();
+  });
 
   const data = session.data;
 

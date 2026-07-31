@@ -20,6 +20,7 @@ from . import db as dbmod
 from . import services
 from .brief import brief_for_session
 from .config import settings
+from .paths import feedback_path
 
 # Fields worth spending tokens on when handing vocabulary to Claude.
 VOCAB_SLICE = (
@@ -272,6 +273,21 @@ def cmd_feedback_apply(args: argparse.Namespace) -> int:
             print(f"error: markdown file not found: {md_path}", file=sys.stderr)
             return 2
         markdown = md_path.read_text(encoding="utf-8")
+    else:
+        # Without `--markdown` the only markdown that can be linked is a file already
+        # sitting at the canonical path. A skill that wrote `data/feedback/<id>.md`
+        # relative to `backend/` misses it, and the session would be marked processed
+        # with no feedback for the frontend to render - a silent loss discovered only
+        # by looking at the UI. Refuse instead, and say where the file has to be.
+        session_id = payload.get("session_id") if isinstance(payload, dict) else None
+        expected = feedback_path(int(session_id)) if session_id is not None else None
+        if expected is None or not expected.is_file():
+            print(
+                f"error: no feedback markdown for session {session_id}. Pass --markdown "
+                f"<path>, or write the file to {expected} first.",
+                file=sys.stderr,
+            )
+            return 2
     try:
         emit(services.record_feedback(payload, markdown=markdown))
     except services.WorkflowError as exc:
