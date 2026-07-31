@@ -98,8 +98,8 @@ backend/          FastAPI app, WhisperX/Silero pipeline, SQLite, the `ect` CLI
   tests/          91 tests, no GPU required
 frontend/         React + TypeScript (Vite)
 .claude/skills/   generate-topic, process-session, vocab-review
-data/             recordings, transcripts, feedback, prompts, app.db  (gitignored)
-docs/             profile, rubric, commands, setup, adr/
+data/             recordings, transcripts, feedback, prompts, profile, app.db  (gitignored)
+docs/             rubric, commands, setup, profile.example.md, adr/
 models/           downloaded model weights                            (gitignored)
 ```
 
@@ -127,5 +127,5 @@ Phase 1 and 2 of [PRD §15](PRD.md) are implemented, plus interview mode from Ph
 the full record → transcribe → analyse → score → reschedule loop, spaced repetition,
 all seven frontend pages, and the in-frontend Process queue.
 
-`docs/profile.md` is still a template — it fills itself in as `/process-session` infers
+`data/profile.md` (seeded from `docs/profile.example.md`, gitignored) is still a template — it fills itself in as `/process-session` infers
 facts about you, and topics get noticeably better once it has real content.

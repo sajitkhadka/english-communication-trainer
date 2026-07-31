@@ -53,7 +53,15 @@ class Settings(BaseSettings):
 
     @property
     def profile_path(self) -> Path:
-        return self.docs_dir / "profile.md"
+        """The live profile. It lives in `data/`, not `docs/`, because it is personal
+        state rather than documentation: `/process-session` fills it with employer,
+        projects and weaknesses, and `data/` is the tree git ignores and backups cover.
+        `docs/profile.example.md` is the tracked seed it starts from."""
+        return self.data_dir / "profile.md"
+
+    @property
+    def profile_template_path(self) -> Path:
+        return self.docs_dir / "profile.example.md"
 
 
 @lru_cache

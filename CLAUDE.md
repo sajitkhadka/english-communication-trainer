@@ -110,6 +110,10 @@ must stay honest about that — `ProcessResponse.hint` carries the wording.
   DB stays portable. Do not store absolute paths. Skills run from `backend/`, so a
   relative `data/…` in a skill resolves to `backend/data/` — always let the backend
   resolve paths (`ect feedback apply --markdown …`) rather than writing into `data/`.
+- **The live profile is `data/profile.md`, not `docs/profile.md`** as PRD §7.1 sketches.
+  It accumulates employer, projects and weaknesses, and the repo is pushed to GitHub, so
+  it is personal state: gitignored, backed up with the rest of `data/`, and seeded from
+  the tracked `docs/profile.example.md` by `paths.seed_profile` (which never overwrites).
 - **Audio decoding goes through ffmpeg** (`pipeline/audio.py`), never torchaudio — the
   browser uploads webm/opus or mp4, and the installed torchcodec backend does not work
   on Windows. A `torchcodec` import warning is expected and harmless.

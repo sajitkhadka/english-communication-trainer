@@ -1,11 +1,16 @@
 # User Profile
 
+**This is the tracked template, not the live profile.** The real one is
+`data/profile.md` — copied from this file on first run, gitignored, and never
+committed: it fills up with your employer, projects and weaknesses. Edit `data/profile.md`,
+not this file.
+
 Read in full by `/generate-topic` so practice topics connect to real work rather than
 generic prompts. Kept as prose in markdown rather than in SQLite on purpose (PRD 7.1):
 it is small, it is read whole every time, and prose is what it is for.
 
-`/process-session` folds newly inferred facts in here automatically after every session.
-Additive edits only - nothing here gets rewritten or deleted, so the file becomes more
+`/process-session` folds newly inferred facts in there automatically after every session.
+Additive edits only - nothing gets rewritten or deleted, so the file becomes more
 useful the longer it is used.
 
 > **Seeding:** everything below is a placeholder. Either fill in what you know now, or

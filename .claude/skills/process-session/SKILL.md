@@ -156,7 +156,9 @@ re-run rather than applying the payload alone.
 
 ## 7. Update the profile (every run, no separate command)
 
-Read `docs/profile.md`. If the session revealed anything genuinely new and durable
+Read `data/profile.md` (repo root, not `backend/data/` - commands run from `backend/`).
+It is gitignored personal state seeded from `docs/profile.example.md`; edit the live file,
+never the template. If the session revealed anything genuinely new and durable
 about the user - role, employer, team, tech stack, current projects, interests,
 recurring language weaknesses - fold it into the right section with a small edit.
 

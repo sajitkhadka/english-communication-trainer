@@ -16,6 +16,24 @@ def ensure_tree() -> None:
     for sub in ("transcripts", "feedback", "prompts", "queue"):
         (settings.data_dir / sub).mkdir(parents=True, exist_ok=True)
     settings.docs_dir.mkdir(parents=True, exist_ok=True)
+    seed_profile()
+
+
+def seed_profile() -> Path:
+    """Copy the tracked template to `data/profile.md` on a fresh checkout.
+
+    Never overwrites: the live profile is the one file the user and Claude both edit by
+    hand, and it is not in git, so a clobber is unrecoverable.
+    """
+    profile = settings.profile_path
+    if not profile.is_file():
+        template = settings.profile_template_path
+        profile.parent.mkdir(parents=True, exist_ok=True)
+        profile.write_text(
+            template.read_text(encoding="utf-8") if template.is_file() else "# User Profile\n",
+            encoding="utf-8",
+        )
+    return profile
 
 
 def recording_path(session_id: int, mode: str, suffix: str = ".wav") -> Path:

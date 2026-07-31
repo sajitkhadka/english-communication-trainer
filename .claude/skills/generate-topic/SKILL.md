@@ -1,6 +1,6 @@
 ---
 name: generate-topic
-description: Generate a practice topic for the English Communication Trainer - a recommended topic with brand-new target vocabulary, an interview question, or a free-form prompt - personalised from docs/profile.md and the words currently due for review. Use when the user asks for a new topic, a practice prompt, an interview question, or runs /generate-topic.
+description: Generate a practice topic for the English Communication Trainer - a recommended topic with brand-new target vocabulary, an interview question, or a free-form prompt - personalised from data/profile.md and the words currently due for review. Use when the user asks for a new topic, a practice prompt, an interview question, or runs /generate-topic.
 ---
 
 # generate-topic
@@ -18,7 +18,8 @@ uv run ect vocab due --limit 15     # words needing review + corpus stats
 uv run ect requests list            # topic requests raised from the frontend
 ```
 
-Then read `docs/profile.md` in full. It is short and it is the whole point: the topic
+Then read `data/profile.md` in full (repo root, not `backend/data/` - commands run from
+`backend/`). It is short and it is the whole point: the topic
 must connect to this user's actual role, stack, employer, and interests. If the profile
 is still a template with no real facts in it, say so in your final message and pick a
 topic that suits a generic mid-level software engineer.

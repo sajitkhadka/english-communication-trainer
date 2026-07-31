@@ -1,9 +1,17 @@
 # --- data (structure is tracked via .gitkeep, contents are not) ---
 # The directory re-include is required: git will not descend into an excluded
 # directory, so without it the .gitkeep negation below can never match.
+# `data/profile.md` is in here on purpose: it holds employer, projects and language
+# weaknesses. `docs/profile.example.md` is the tracked seed it is copied from.
 data/**
 !data/**/
 !data/**/.gitkeep
+
+# A stray profile at the pre-move path must never be committed either.
+docs/profile.md
+
+# Recordings and stray data trees from running commands outside the repo root.
+backend/data/
 
 # --- models / caches ---
 models/

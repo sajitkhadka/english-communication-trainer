@@ -31,7 +31,7 @@ the queue has something for Claude to read. A session whose transcription failed
 
 ### `/generate-topic [recommended|interview|freeform] [category…]`
 
-Creates one practice session. Reads `docs/profile.md` and the words due for review,
+Creates one practice session. Reads `data/profile.md` and the words due for review,
 picks 5-6 target words (a blend of due and brand-new) for `recommended`, writes the
 session row and `data/prompts/<id>.json`.
 
@@ -53,7 +53,7 @@ session row and `data/prompts/<id>.json`.
 
 Writes `data/feedback/<id>.md`, inserts the score, applies SM-2 updates to every target
 word, adds new vocabulary, and folds anything newly learned about you into
-`docs/profile.md`.
+`data/profile.md`.
 
 Feedback always contains: filler and hesitation analysis (textual **and** acoustic),
 stronger word/phrase/idiom swaps, sentence-structure rewrites, grammar corrections,
