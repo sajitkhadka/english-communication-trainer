@@ -30,6 +30,7 @@ export default function App() {
           <NavLink to="/recommended">Recommended</NavLink>
           <NavLink to="/freeform">Free-form</NavLink>
           <NavLink to="/interview">Interview</NavLink>
+          <NavLink to="/worklog">Worklog</NavLink>
           <NavLink to="/vocabulary">Vocabulary</NavLink>
           <NavLink to="/suggestions">Suggestions</NavLink>
           <NavLink to="/progress">Progress</NavLink>
@@ -55,6 +56,10 @@ export default function App() {
           <Route
             path="/interview"
             element={<Sessions mode="interview" onQueueChange={queue.reload} />}
+          />
+          <Route
+            path="/worklog"
+            element={<Sessions mode="worklog" onQueueChange={queue.reload} />}
           />
           <Route path="/session/:id" element={<SessionDetail onQueueChange={queue.reload} />} />
           <Route path="/vocabulary" element={<Vocabulary />} />

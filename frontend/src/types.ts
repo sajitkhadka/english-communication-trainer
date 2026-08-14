@@ -1,4 +1,4 @@
-export type Mode = "recommended" | "freeform" | "interview";
+export type Mode = "recommended" | "freeform" | "interview" | "worklog";
 export type SessionStatus = "awaiting_recording" | "recorded" | "pending" | "processed";
 
 export interface Score {

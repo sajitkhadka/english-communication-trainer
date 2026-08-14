@@ -114,8 +114,12 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
 
       {data.status === "pending" && (
         <p className="notice">
-          Queued for Claude. Run <code>/process-session</code> in the Claude Code console to
-          generate feedback for every queued session.
+          Queued for Claude. Run{" "}
+          <code>{data.mode === "worklog" ? "/log-work" : "/process-session"}</code> in the
+          Claude Code console to
+          {data.mode === "worklog"
+            ? " turn this recording into a journal entry."
+            : " generate feedback for every queued session."}
         </p>
       )}
       {data.transcribe_status === "error" && (
@@ -242,7 +246,7 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
       {data.feedback_markdown ? (
         <div className="card">
           <div className="card-head">
-            <h2>Feedback</h2>
+            <h2>{data.mode === "worklog" ? "Journal entry" : "Feedback"}</h2>
             <span className="muted small">{data.feedback_path}</span>
           </div>
           <Markdown>{data.feedback_markdown}</Markdown>
@@ -250,16 +254,19 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
       ) : (
         data.status !== "awaiting_recording" && (
           <div className="card">
-            <Empty title="No feedback yet">
+            <Empty title={data.mode === "worklog" ? "No journal entry yet" : "No feedback yet"}>
               <p>
                 {data.status === "pending" ? (
                   <>
-                    This session is queued. Run <code>/process-session</code> in the console.
+                    This session is queued. Run{" "}
+                    <code>{data.mode === "worklog" ? "/log-work" : "/process-session"}</code> in
+                    the console.
                   </>
                 ) : (
                   <>
                     Press <strong>Process</strong> above, then run{" "}
-                    <code>/process-session</code> in the console.
+                    <code>{data.mode === "worklog" ? "/log-work" : "/process-session"}</code> in
+                    the console.
                   </>
                 )}
               </p>

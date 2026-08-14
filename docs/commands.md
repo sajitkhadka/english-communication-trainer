@@ -25,6 +25,10 @@ All `ect` commands run from `backend/`. `uv run ect …` and
 the queue has something for Claude to read. A session whose transcription failed stays
 `recorded` and reports `queued: false`; the failure is in `transcribe_error`.
 
+The worklog variant (PRD-worklog) shares the pipeline but ends differently: record under
+**Worklog** in the frontend, press Process, then run `/log-work` — the result is a
+journal entry in `data/worklog/daily/`, not feedback or a score.
+
 ---
 
 ## Skills
@@ -58,6 +62,16 @@ word, adds new vocabulary, and folds anything newly learned about you into
 Feedback always contains: filler and hesitation analysis (textual **and** acoustic),
 stronger word/phrase/idiom swaps, sentence-structure rewrites, grammar corrections,
 target-word usage check, a **model answer**, the rubric score, and one next focus.
+
+### `/log-work [<session_id>]`
+
+Turns pending `worklog` sessions (the daily spoken work journal) into structured
+entries: projects, decisions with the why, hurdles, wins, competency tags from a
+controlled list. Files the entry via `ect worklog add`, which stores the markdown at
+`data/worklog/daily/<date>.md`, indexes it for retrieval, and marks the session
+processed. A second recording on the same date is merged, never overwritten blindly.
+No score — worklog sessions are journal captures, not practice, and
+`/process-session` skips them.
 
 ### `/vocab-review [limit]`
 
@@ -145,6 +159,29 @@ Payload:
 - `new_words`: professional/elevating terms only. `source` is `recommended` (you
   suggested it) or `user_speech` (they produced it and it is worth consolidating).
 - `suggestions`: optional; populates the frontend's Suggestions page.
+
+### Worklog
+
+```bash
+uv run ect worklog add --markdown entry.md --date 2026-08-14 \
+    --summary "Shipped batched writes; cut p99 40%" \
+    --projects "payment-migration,oncall" --tags "debugging,cross-team" --session 12
+
+uv run ect worklog list --month 2026-08 --tag conflict --project payment-migration
+uv run ect worklog show 2026-08-14        # daily entry
+uv run ect worklog show 2026-08           # monthly rollup
+uv run ect worklog rollup status          # completed months with entries but no rollup
+uv run ect worklog rollup add --month 2026-08 --markdown rollup.md
+```
+
+`worklog add` is the journal's single write path: it validates the tags against the
+controlled list (PRD-worklog 6.1), files the markdown at `data/worklog/daily/<date>.md`
+(one file per date — it overwrites, so merging same-day additions happens in the skill
+before calling), upserts the index row, and if `--session` is given links the session
+and flips it to `processed`. `ect feedback apply` refuses worklog sessions by design.
+
+Entries outlive sessions: deleting a worklog session from the frontend removes the
+recording and transcript but never the journal entry.
 
 ### Suggestions
 

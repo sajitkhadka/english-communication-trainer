@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-Mode = Literal["recommended", "freeform", "interview"]
+Mode = Literal["recommended", "freeform", "interview", "worklog"]
 Status = Literal["awaiting_recording", "recorded", "pending", "processed"]
 
 

@@ -362,6 +362,121 @@ def words_for_session(conn: sqlite3.Connection, session_id: int) -> list[dict[st
 
 
 # --------------------------------------------------------------------------- #
+# worklog (PRD-worklog 6.3)
+# --------------------------------------------------------------------------- #
+
+
+def upsert_worklog_entry(
+    conn: sqlite3.Connection,
+    *,
+    entry_date: str,
+    path: str,
+    session_id: int | None = None,
+    projects: list[str] | None = None,
+    tags: list[str] | None = None,
+    summary: str | None = None,
+) -> int:
+    now = utcnow()
+    cur = conn.execute(
+        """INSERT INTO worklog_entries
+             (entry_date, session_id, projects, tags, summary, path, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(entry_date) DO UPDATE
+             SET session_id = COALESCE(excluded.session_id, session_id),
+                 projects   = excluded.projects,
+                 tags       = excluded.tags,
+                 summary    = excluded.summary,
+                 path       = excluded.path,
+                 updated_at = excluded.updated_at""",
+        (
+            entry_date,
+            session_id,
+            json.dumps(projects or []),
+            json.dumps(tags or []),
+            summary,
+            path,
+            now,
+            now,
+        ),
+    )
+    if cur.lastrowid:
+        return int(cur.lastrowid)
+    row = conn.execute(
+        "SELECT id FROM worklog_entries WHERE entry_date = ?", (entry_date,)
+    ).fetchone()
+    return int(row["id"])
+
+
+def hydrate_worklog_entry(row: sqlite3.Row) -> dict[str, Any]:
+    data = dict(row)
+    data["projects"] = _loads(data.get("projects"), [])
+    data["tags"] = _loads(data.get("tags"), [])
+    return data
+
+
+def get_worklog_entry(conn: sqlite3.Connection, entry_date: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM worklog_entries WHERE entry_date = ?", (entry_date,)
+    ).fetchone()
+    return hydrate_worklog_entry(row) if row else None
+
+
+def list_worklog_entries(
+    conn: sqlite3.Connection,
+    *,
+    month: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    tag: str | None = None,
+    project: str | None = None,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM worklog_entries WHERE 1=1"
+    args: list[Any] = []
+    if month:
+        sql += " AND entry_date LIKE ?"
+        args.append(f"{month}-%")
+    if date_from:
+        sql += " AND entry_date >= ?"
+        args.append(date_from)
+    if date_to:
+        sql += " AND entry_date <= ?"
+        args.append(date_to)
+    # Tags and projects are small JSON arrays; matching the quoted element is exact
+    # enough at journal scale and keeps the schema to one table.
+    if tag:
+        sql += " AND tags LIKE ?"
+        args.append(f'%"{tag}"%')
+    if project:
+        sql += " AND projects LIKE ?"
+        args.append(f'%"{project}"%')
+    sql += " ORDER BY entry_date DESC LIMIT ?"
+    args.append(limit)
+    return [hydrate_worklog_entry(r) for r in conn.execute(sql, args)]
+
+
+def worklog_months(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute(
+        "SELECT DISTINCT substr(entry_date, 1, 7) AS month FROM worklog_entries ORDER BY month"
+    )
+    return [r["month"] for r in rows]
+
+
+def upsert_worklog_rollup(conn: sqlite3.Connection, *, month: str, path: str) -> None:
+    conn.execute(
+        """INSERT INTO worklog_rollups (month, path, created_at) VALUES (?, ?, ?)
+           ON CONFLICT(month) DO UPDATE
+             SET path = excluded.path, created_at = excluded.created_at""",
+        (month, path, utcnow()),
+    )
+
+
+def worklog_rollup_months(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute("SELECT month FROM worklog_rollups ORDER BY month")
+    return [r["month"] for r in rows]
+
+
+# --------------------------------------------------------------------------- #
 # suggestions
 # --------------------------------------------------------------------------- #
 
@@ -398,9 +513,7 @@ def list_suggestions(
     return out
 
 
-def add_suggestion_request(
-    conn: sqlite3.Connection, *, mode: str, category: str | None
-) -> int:
+def add_suggestion_request(conn: sqlite3.Connection, *, mode: str, category: str | None) -> int:
     cur = conn.execute(
         "INSERT INTO suggestion_requests (mode, category, created_at) VALUES (?, ?, ?)",
         (mode, category, utcnow()),
@@ -409,7 +522,5 @@ def add_suggestion_request(
 
 
 def open_suggestion_requests(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    rows = conn.execute(
-        "SELECT * FROM suggestion_requests WHERE status = 'open' ORDER BY id ASC"
-    )
+    rows = conn.execute("SELECT * FROM suggestion_requests WHERE status = 'open' ORDER BY id ASC")
     return [dict(r) for r in rows]

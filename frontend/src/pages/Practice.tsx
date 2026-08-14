@@ -16,6 +16,7 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
   const [error, setError] = useState<string | null>(null);
   const [topic, setTopic] = useState("");
   const [creating, setCreating] = useState(false);
+  const [creatingWorklog, setCreatingWorklog] = useState(false);
   const [queueing, setQueueing] = useState<number | null>(null);
 
   const reloadAll = () => {
@@ -36,6 +37,21 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
       setError(err instanceof Error ? err.message : "Could not create the session.");
     } finally {
       setCreating(false);
+    }
+  };
+
+  const startWorklog = async () => {
+    setCreatingWorklog(true);
+    setError(null);
+    try {
+      // The backend names it "Worklog - <date>"; no topic or target words apply.
+      const session = await api.createSession({ mode: "worklog" });
+      setActive(session);
+      reloadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the worklog session.");
+    } finally {
+      setCreatingWorklog(false);
     }
   };
 
@@ -234,6 +250,21 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
         <div className="btn-row" style={{ marginTop: "0.85rem" }}>
           <button className="primary" onClick={startFreeform} disabled={creating}>
             {creating ? "Creating…" : "Start free-form session"}
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <h2>Daily worklog</h2>
+        </div>
+        <p className="card-sub">
+          Ten minutes on your day: what you did, decisions and why, hurdles, wins,
+          what&apos;s next. <code>/log-work</code> turns it into a journal entry — no score.
+        </p>
+        <div className="btn-row">
+          <button className="primary" onClick={startWorklog} disabled={creatingWorklog}>
+            {creatingWorklog ? "Creating…" : "Record today's worklog"}
           </button>
         </div>
       </div>

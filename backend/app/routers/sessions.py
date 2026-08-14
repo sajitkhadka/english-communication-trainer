@@ -33,12 +33,21 @@ SUFFIX_BY_TYPE = {
 }
 
 
+def _feedback_file(session: dict[str, Any]) -> Path:
+    """The stored path wins: worklog sessions link their daily journal entry, which
+    lives under data/worklog/, not at the canonical data/feedback/<id>.md."""
+    stored = abspath(session.get("feedback_path"))
+    if stored and stored.is_file():
+        return stored
+    return feedback_path(session["id"])
+
+
 def _decorate(session: dict[str, Any], conn) -> dict[str, Any]:
     sid = session["id"]
     audio = abspath(session.get("audio_path")) or find_recording(sid, session["mode"])
     session["has_audio"] = bool(audio and Path(audio).is_file())
     session["has_transcript"] = transcript_path(sid).is_file()
-    session["has_feedback"] = feedback_path(sid).is_file()
+    session["has_feedback"] = _feedback_file(session).is_file()
     session["score"] = dbmod.get_score(conn, sid)
     return session
 
@@ -89,10 +98,8 @@ def get_session(session_id: int) -> Any:
             }
             for term in session.get("target_words") or []
         ]
-    path = feedback_path(session_id)
-    detail["feedback_markdown"] = (
-        path.read_text(encoding="utf-8") if path.is_file() else None
-    )
+    path = _feedback_file(session)
+    detail["feedback_markdown"] = path.read_text(encoding="utf-8") if path.is_file() else None
     return detail
 
 
@@ -104,8 +111,12 @@ def delete_session(session_id: int) -> None:
             raise HTTPException(status_code=404, detail=f"session {session_id} not found")
         conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     audio = abspath(session.get("audio_path")) or find_recording(session_id, session["mode"])
-    for path in (audio, transcript_path(session_id), feedback_path(session_id),
-                 prompt_path(session_id)):
+    for path in (
+        audio,
+        transcript_path(session_id),
+        feedback_path(session_id),
+        prompt_path(session_id),
+    ):
         if path and Path(path).is_file():
             Path(path).unlink()
     services.clear_queue_marker(session_id)
@@ -165,7 +176,11 @@ def get_brief(session_id: int, max_sentences: int | None = None) -> str:
 
 @router.get("/{session_id}/feedback", response_class=PlainTextResponse)
 def get_feedback(session_id: int) -> str:
-    path = feedback_path(session_id)
+    with dbmod.cursor() as conn:
+        session = dbmod.get_session(conn, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"session {session_id} not found")
+    path = _feedback_file(session)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="no feedback yet for this session")
     return path.read_text(encoding="utf-8")

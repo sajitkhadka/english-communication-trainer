@@ -77,7 +77,7 @@ Two ideas carry the design:
    existing entry rather than creating a sibling file.
 
 ### 4.2 Monthly rollup
-1. `/log-work` finishes by checking `ect worklog rollup-status`; if a completed month
+1. `/log-work` finishes by checking `ect worklog rollup status`; if a completed month
    has no rollup it says so. The user runs `/worklog-rollup [YYYY-MM]` when ready.
 2. The skill reads that month's daily entries (~22 × 300 tokens), writes one rollup
    organised by project and theme with `→ YYYY-MM-DD` pointers on every claim, and
@@ -196,7 +196,7 @@ The backend resolves all paths.
 | `ect worklog add --markdown <file> --date <d> --projects <csv> --tags <csv> --summary <line> [--session <id>]` | Validates tags against the controlled list, files/merges the daily entry, upserts the index row, links + completes the session. The single write path. |
 | `ect worklog list [--month M] [--from/--to] [--tag T] [--project P]` | Index rows: date, projects, tags, one-liner, path. |
 | `ect worklog show <date \| YYYY-MM>` | Prints a daily entry or a month's rollup. |
-| `ect worklog rollup-status` | Completed months lacking a rollup. |
+| `ect worklog rollup status` | Completed months lacking a rollup. |
 | `ect worklog rollup add --month M --markdown <file>` | Files/overwrites a monthly rollup. |
 
 | Skill | Reads | Writes |

@@ -20,7 +20,7 @@ def health() -> Any:
         pending = len(dbmod.list_sessions(conn, status="pending"))
         counts = {
             mode: len(dbmod.list_sessions(conn, mode=mode, limit=1000))
-            for mode in ("recommended", "freeform", "interview")
+            for mode in ("recommended", "freeform", "interview", "worklog")
         }
     return {
         "ok": True,
@@ -56,7 +56,10 @@ def queue() -> Any:
     return {
         "pending": sessions,
         "count": len(sessions),
-        "hint": "Run `/process-session` in the Claude Code console to drain this queue.",
+        "hint": (
+            "Run `/process-session` (practice) or `/log-work` (worklog) in the "
+            "Claude Code console to drain this queue."
+        ),
     }
 
 

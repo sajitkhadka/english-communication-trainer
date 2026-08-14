@@ -31,6 +31,10 @@ uv run ect session show 12          # specific id - check `status` before doing 
 If a specific session is already `processed` and `--force` was not passed, say so
 plainly and stop. If nothing is pending, say that and stop.
 
+**Skip sessions whose `mode` is `worklog`** - they are journal captures, not practice,
+and belong to `/log-work`. If the queue contains only worklog sessions, say so and
+point the user at `/log-work` instead.
+
 ## 2. Make sure it is transcribed
 
 If `has_transcript` is false (or `transcribe_status` is not `done`):

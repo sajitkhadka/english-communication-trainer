@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .config import settings
 
-MODES = ("recommended", "freeform", "interview")
+MODES = ("recommended", "freeform", "interview", "worklog")
 
 
 def ensure_tree() -> None:
@@ -15,6 +15,8 @@ def ensure_tree() -> None:
         (settings.data_dir / "recordings" / mode).mkdir(parents=True, exist_ok=True)
     for sub in ("transcripts", "feedback", "prompts", "queue"):
         (settings.data_dir / sub).mkdir(parents=True, exist_ok=True)
+    for sub in ("daily", "monthly", "prep"):
+        (settings.data_dir / "worklog" / sub).mkdir(parents=True, exist_ok=True)
     settings.docs_dir.mkdir(parents=True, exist_ok=True)
     seed_profile()
 
@@ -65,6 +67,14 @@ def prompt_path(session_id: int) -> Path:
 
 def queue_marker(session_id: int) -> Path:
     return settings.data_dir / "queue" / f"{session_id}.pending"
+
+
+def worklog_daily_path(entry_date: str) -> Path:
+    return settings.data_dir / "worklog" / "daily" / f"{entry_date}.md"
+
+
+def worklog_rollup_path(month: str) -> Path:
+    return settings.data_dir / "worklog" / "monthly" / f"{month}.md"
 
 
 def relpath(path: Path | str | None) -> str | None:

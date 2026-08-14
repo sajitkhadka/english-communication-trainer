@@ -9,6 +9,7 @@ export const MODE_LABEL: Record<Mode, string> = {
   recommended: "Recommended",
   freeform: "Free-form",
   interview: "Interview",
+  worklog: "Worklog",
 };
 
 const STATUS_LABEL: Record<SessionStatus, string> = {

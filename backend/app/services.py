@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,8 @@ from .paths import (
     recording_path,
     relpath,
     transcript_path,
+    worklog_daily_path,
+    worklog_rollup_path,
 )
 
 log = logging.getLogger(__name__)
@@ -48,10 +51,13 @@ def create_session(
     notes: str | None = None,
     write_prompt: bool = True,
 ) -> dict[str, Any]:
-    if mode not in ("recommended", "freeform", "interview"):
+    if mode not in ("recommended", "freeform", "interview", "worklog"):
         raise WorkflowError(f"unknown mode {mode!r}")
     if mode in ("recommended", "interview") and not topic:
         raise WorkflowError(f"{mode} sessions need a topic")
+    if mode == "worklog" and not topic:
+        # Plain hyphen: the topic round-trips through Windows consoles via the CLI.
+        topic = f"Worklog - {dbmod.today()}"
     ensure_tree()
     with dbmod.cursor() as conn:
         session_id = dbmod.create_session(
@@ -183,8 +189,11 @@ def _transcribe_session(session_id: int, *, force: bool = False) -> dict[str, An
                 transcript_path=relpath(existing),
                 transcribe_status="done",
             )
-            return {"session_id": session_id, "status": "already_transcribed",
-                    "transcript_path": relpath(existing)}
+            return {
+                "session_id": session_id,
+                "status": "already_transcribed",
+                "transcript_path": relpath(existing),
+            }
         audio = abspath(session.get("audio_path")) or find_recording(session_id, session["mode"])
         if audio is None or not Path(audio).is_file():
             raise WorkflowError(f"session {session_id} has no stored audio to transcribe")
@@ -234,8 +243,11 @@ def _transcribe_session(session_id: int, *, force: bool = False) -> dict[str, An
 
 
 QUEUED_HINT = (
-    "Flagged for Claude. Run `/process-session` in the Claude Code console to "
-    "generate feedback."
+    "Flagged for Claude. Run `/process-session` in the Claude Code console to generate feedback."
+)
+QUEUED_HINT_WORKLOG = (
+    "Flagged for Claude. Run `/log-work` in the Claude Code console to turn this "
+    "recording into a journal entry."
 )
 NOT_QUEUED_HINT = (
     "Not queued: there is no transcript for Claude to read yet. Press Process again "
@@ -286,7 +298,7 @@ def enqueue(session_id: int, *, transcribe: bool | None = None) -> dict[str, Any
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(dbmod.utcnow(), encoding="utf-8")
     result["status"] = "pending"
-    result["hint"] = QUEUED_HINT
+    result["hint"] = QUEUED_HINT_WORKLOG if session["mode"] == "worklog" else QUEUED_HINT
     return result
 
 
@@ -336,6 +348,12 @@ def record_feedback(payload: dict[str, Any], *, markdown: str | None = None) -> 
         session = dbmod.get_session(conn, session_id)
         if session is None:
             raise WorkflowError(f"session {session_id} does not exist")
+        if session["mode"] == "worklog":
+            # Scoring a journal rewards performing over reporting (PRD-worklog 5.1).
+            raise WorkflowError(
+                f"session {session_id} is a worklog session - apply it with "
+                "`ect worklog add`, not `ect feedback apply`"
+            )
         if session["mode"] == "freeform":
             scores.pop("target_usage", None)  # N/A (PRD 9)
 
@@ -445,3 +463,126 @@ def _apply_suggestions(conn, default_mode: str, entries: list[dict[str, Any]]) -
             target_words=entry.get("target_words") or [],
             rationale=entry.get("rationale"),
         )
+
+
+# --------------------------------------------------------------------------- #
+# worklog (PRD-worklog: the journal's single write path)
+# --------------------------------------------------------------------------- #
+
+# Controlled competency vocabulary (PRD-worklog 6.1). Free-form tags fragment into
+# synonyms and break tag-based retrieval; extending this tuple is a deliberate edit
+# to the PRD, not a per-entry improvisation.
+WORKLOG_TAGS = (
+    "leadership",
+    "ownership",
+    "conflict",
+    "ambiguity",
+    "cross-team",
+    "debugging",
+    "design-tradeoff",
+    "mentoring",
+    "failure",
+    "delivery",
+    "influence",
+)
+
+_MONTH_RE = re.compile(r"\d{4}-\d{2}")
+
+
+def _validate_iso_date(value: str, *, what: str) -> str:
+    from datetime import date
+
+    try:
+        return date.fromisoformat(value).isoformat()
+    except (TypeError, ValueError) as exc:
+        raise WorkflowError(f"{what} must be an ISO date (YYYY-MM-DD), got {value!r}") from exc
+
+
+def record_worklog_entry(
+    *,
+    entry_date: str,
+    markdown: str,
+    summary: str,
+    projects: list[str] | None = None,
+    tags: list[str] | None = None,
+    session_id: int | None = None,
+) -> dict[str, Any]:
+    """File one day's journal entry and index it. Overwrites the day's file: merging
+    a second same-day recording into the existing entry is judgement, so the skill
+    reads the old entry, merges, and hands the combined markdown back here."""
+    entry_date = _validate_iso_date(entry_date, what="entry date")
+    if not markdown.strip():
+        raise WorkflowError("the entry markdown is empty")
+    if not (summary or "").strip():
+        raise WorkflowError("a one-line summary is required - it is what listings show")
+    unknown = [t for t in (tags or []) if t not in WORKLOG_TAGS]
+    if unknown:
+        raise WorkflowError(f"unknown worklog tags {unknown}; allowed: {', '.join(WORKLOG_TAGS)}")
+
+    ensure_tree()
+    path = worklog_daily_path(entry_date)
+    path.write_text(markdown, encoding="utf-8")
+
+    with dbmod.cursor() as conn:
+        if session_id is not None:
+            session = dbmod.get_session(conn, session_id)
+            if session is None:
+                raise WorkflowError(f"session {session_id} does not exist")
+            if session["mode"] != "worklog":
+                raise WorkflowError(
+                    f"session {session_id} is a {session['mode']} session, not worklog"
+                )
+        entry_id = dbmod.upsert_worklog_entry(
+            conn,
+            entry_date=entry_date,
+            path=relpath(path) or str(path),
+            session_id=session_id,
+            projects=projects,
+            tags=tags,
+            summary=summary.strip(),
+        )
+        if session_id is not None:
+            # The daily entry is what the frontend renders for this session.
+            dbmod.update_session(
+                conn,
+                session_id,
+                status="processed",
+                processed_at=dbmod.utcnow(),
+                feedback_path=relpath(path),
+            )
+    if session_id is not None:
+        clear_queue_marker(session_id)
+    return {
+        "entry_id": entry_id,
+        "entry_date": entry_date,
+        "path": relpath(path),
+        "session_id": session_id,
+        "status": "processed" if session_id is not None else None,
+    }
+
+
+def record_worklog_rollup(*, month: str, markdown: str) -> dict[str, Any]:
+    if not _MONTH_RE.fullmatch(month or ""):
+        raise WorkflowError(f"month must look like YYYY-MM, got {month!r}")
+    if not markdown.strip():
+        raise WorkflowError("the rollup markdown is empty")
+    ensure_tree()
+    path = worklog_rollup_path(month)
+    path.write_text(markdown, encoding="utf-8")
+    with dbmod.cursor() as conn:
+        dbmod.upsert_worklog_rollup(conn, month=month, path=relpath(path) or str(path))
+    return {"month": month, "path": relpath(path)}
+
+
+def worklog_rollup_status() -> dict[str, Any]:
+    """Which completed months have entries but no rollup yet. The current month is
+    never 'missing' - it is still accumulating."""
+    with dbmod.cursor() as conn:
+        months = dbmod.worklog_months(conn)
+        rolled = set(dbmod.worklog_rollup_months(conn))
+    current = dbmod.today()[:7]
+    return {
+        "months_with_entries": months,
+        "rollups": sorted(rolled),
+        "missing": [m for m in months if m < current and m not in rolled],
+    }

@@ -152,7 +152,8 @@ It touches six places, and missing one produces a silently wrong `overall`:
 ## Reference
 
 - `PRD.md` — the specification this implements
-- `PRD-worklog.md` — the worklog / interview-story extension (not yet built)
+- `PRD-worklog.md` — the worklog / interview-story extension (Phase 1 capture is built;
+  rollup generation and `/interview-prep` are not)
 - `docs/commands.md` — every skill and `ect` command, with payload shapes
 - `docs/rubric.md` — scoring anchors; read before scoring anything
 - `docs/setup.md` — prerequisites, VRAM ladder, config env vars, troubleshooting

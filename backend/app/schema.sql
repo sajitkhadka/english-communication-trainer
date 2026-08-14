@@ -30,7 +30,7 @@ CREATE INDEX IF NOT EXISTS idx_words_mastery ON words(mastery);
 
 CREATE TABLE IF NOT EXISTS sessions (
   id              INTEGER PRIMARY KEY,
-  mode            TEXT NOT NULL,            -- recommended | freeform | interview
+  mode            TEXT NOT NULL,            -- recommended | freeform | interview | worklog
   category        TEXT,
   topic           TEXT,
   target_words    TEXT,                     -- JSON array of terms
@@ -96,5 +96,32 @@ CREATE TABLE IF NOT EXISTS suggestion_requests (
   mode       TEXT NOT NULL,
   category   TEXT,
   status     TEXT NOT NULL DEFAULT 'open',  -- open | fulfilled
+  created_at TEXT
+);
+
+-- ADDITIVE (PRD-worklog 6.3): index over the daily work-journal entries in
+-- data/worklog/daily/. The markdown files are the source of truth; these rows make
+-- "my conflict stories" a WHERE clause instead of a crawl. The entry outlives the
+-- session it came from - the journal is the archive, the session is just the capture.
+CREATE TABLE IF NOT EXISTS worklog_entries (
+  id         INTEGER PRIMARY KEY,
+  entry_date TEXT UNIQUE NOT NULL,          -- ISO date; one row per day, same-day adds merge
+  session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
+  projects   TEXT,                          -- JSON array of project slugs
+  tags       TEXT,                          -- JSON array from the controlled list (PRD-worklog 6.1)
+  summary    TEXT,                          -- one line, for lists and retrieval
+  path       TEXT NOT NULL,                 -- repo-relative markdown path
+  created_at TEXT,
+  updated_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_worklog_date ON worklog_entries(entry_date);
+
+-- ADDITIVE (PRD-worklog 6.2): monthly rollups are derived artifacts, regenerable
+-- from the dailies at any time.
+CREATE TABLE IF NOT EXISTS worklog_rollups (
+  id         INTEGER PRIMARY KEY,
+  month      TEXT UNIQUE NOT NULL,          -- 'YYYY-MM'
+  path       TEXT NOT NULL,
   created_at TEXT
 );

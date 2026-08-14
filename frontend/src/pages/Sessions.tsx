@@ -17,6 +17,8 @@ const BLURB: Record<Mode, string> = {
   recommended: "Topics Claude generated with target vocabulary to work in.",
   freeform: "Your own topics. No target words, so target-word usage is not scored.",
   interview: "One-way interview practice: a question, one answer, the same analysis.",
+  worklog:
+    "Daily work journal: talk through your day, then /log-work turns it into a structured entry. Not scored.",
 };
 
 export default function Sessions({
@@ -70,7 +72,7 @@ export default function Sessions({
         ) : rows.length === 0 ? (
           <Empty title={`No ${MODE_LABEL[mode].toLowerCase()} sessions yet`}>
             <p>
-              {mode === "freeform" ? (
+              {mode === "freeform" || mode === "worklog" ? (
                 <>
                   Start one from the <Link to="/">Practice</Link> page.
                 </>

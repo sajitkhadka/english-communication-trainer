@@ -50,11 +50,7 @@ def slim(row: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
     """Drop empty fields to keep the JSON handed to Claude small, but always keep the
     two that carry meaning even when zero."""
     always = ("term", "mastery")
-    return {
-        k: row.get(k)
-        for k in keys
-        if row.get(k) not in (None, "", 0.0) or k in always
-    }
+    return {k: row.get(k) for k in keys if row.get(k) not in (None, "", 0.0) or k in always}
 
 
 # --------------------------------------------------------------------------- #
@@ -297,6 +293,90 @@ def cmd_feedback_apply(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# worklog
+# --------------------------------------------------------------------------- #
+
+WORKLOG_SLICE = ("entry_date", "projects", "tags", "summary", "path", "session_id")
+
+
+def _csv(value: str | None) -> list[str]:
+    return [item.strip() for item in (value or "").split(",") if item.strip()]
+
+
+def cmd_worklog_add(args: argparse.Namespace) -> int:
+    md_path = Path(args.markdown)
+    if not md_path.is_file():
+        print(f"error: markdown file not found: {md_path}", file=sys.stderr)
+        return 2
+    try:
+        emit(
+            services.record_worklog_entry(
+                entry_date=args.date,
+                markdown=md_path.read_text(encoding="utf-8"),
+                summary=args.summary,
+                projects=_csv(args.projects),
+                tags=_csv(args.tags),
+                session_id=args.session,
+            )
+        )
+    except services.WorkflowError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def cmd_worklog_list(args: argparse.Namespace) -> int:
+    with dbmod.cursor() as conn:
+        rows = dbmod.list_worklog_entries(
+            conn,
+            month=args.month,
+            date_from=getattr(args, "from"),
+            date_to=args.to,
+            tag=args.tag,
+            project=args.project,
+            limit=args.limit,
+        )
+    emit([{k: r.get(k) for k in WORKLOG_SLICE} for r in rows])
+    return 0
+
+
+def cmd_worklog_show(args: argparse.Namespace) -> int:
+    """Print a daily entry (YYYY-MM-DD) or a monthly rollup (YYYY-MM)."""
+    from .paths import worklog_daily_path, worklog_rollup_path
+
+    ref = args.date_or_month
+    path = worklog_daily_path(ref) if len(ref) > 7 else worklog_rollup_path(ref)
+    if not path.is_file():
+        kind = "entry" if len(ref) > 7 else "rollup"
+        print(f"error: no worklog {kind} for {ref}", file=sys.stderr)
+        return 2
+    emit(path.read_text(encoding="utf-8"))
+    return 0
+
+
+def cmd_worklog_rollup_add(args: argparse.Namespace) -> int:
+    md_path = Path(args.markdown)
+    if not md_path.is_file():
+        print(f"error: markdown file not found: {md_path}", file=sys.stderr)
+        return 2
+    try:
+        emit(
+            services.record_worklog_rollup(
+                month=args.month, markdown=md_path.read_text(encoding="utf-8")
+            )
+        )
+    except services.WorkflowError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def cmd_worklog_rollup_status(args: argparse.Namespace) -> int:
+    emit(services.worklog_rollup_status())
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # suggestion requests
 # --------------------------------------------------------------------------- #
 
@@ -358,9 +438,7 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
         func=cmd_db_init
     )
 
-    sub.add_parser("doctor", help="check GPU / ffmpeg / db readiness").set_defaults(
-        func=cmd_doctor
-    )
+    sub.add_parser("doctor", help="check GPU / ffmpeg / db readiness").set_defaults(func=cmd_doctor)
 
     # vocab
     vocab_p = sub.add_parser("vocab", help="vocabulary corpus")
@@ -369,8 +447,9 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     p.add_argument("--limit", type=int, default=15)
     p.set_defaults(func=cmd_vocab_due)
     p = vocab_sub.add_parser("list", help="the whole corpus")
-    p.add_argument("--sort", default="recency",
-                   choices=["recency", "frequency", "mastery", "alpha", "due"])
+    p.add_argument(
+        "--sort", default="recency", choices=["recency", "frequency", "mastery", "alpha", "due"]
+    )
     p.add_argument("--limit", type=int, default=1000)
     p.set_defaults(func=cmd_vocab_list)
     vocab_sub.add_parser("stats", help="corpus totals").set_defaults(func=cmd_vocab_stats)
@@ -383,7 +462,9 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     sess_sub = sess_p.add_subparsers(dest="action", required=True)
 
     p = sess_sub.add_parser("create", help="create a session + prompt file")
-    p.add_argument("--mode", required=True, choices=["recommended", "freeform", "interview"])
+    p.add_argument(
+        "--mode", required=True, choices=["recommended", "freeform", "interview", "worklog"]
+    )
     p.add_argument("--topic", help="topic, or the interview question")
     p.add_argument("--category")
     p.add_argument("--target-words", help="comma-separated terms")
@@ -391,9 +472,8 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     p.set_defaults(func=cmd_session_create)
 
     p = sess_sub.add_parser("list", help="list sessions")
-    p.add_argument("--mode", choices=["recommended", "freeform", "interview"])
-    p.add_argument("--status",
-                   choices=["awaiting_recording", "recorded", "pending", "processed"])
+    p.add_argument("--mode", choices=["recommended", "freeform", "interview", "worklog"])
+    p.add_argument("--status", choices=["awaiting_recording", "recorded", "pending", "processed"])
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(func=cmd_session_list)
 
@@ -436,6 +516,42 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     p.add_argument("--json", required=True, help="file path, '-' for stdin, or a JSON string")
     p.add_argument("--markdown", help="path to the feedback markdown to store")
     p.set_defaults(func=cmd_feedback_apply)
+
+    # worklog
+    wl_p = sub.add_parser("worklog", help="daily work journal (PRD-worklog)")
+    wl_sub = wl_p.add_subparsers(dest="action", required=True)
+
+    p = wl_sub.add_parser("add", help="file one day's entry: markdown + index row")
+    p.add_argument("--markdown", required=True, help="path to the entry markdown")
+    p.add_argument("--date", required=True, help="ISO date the entry is for (YYYY-MM-DD)")
+    p.add_argument("--summary", required=True, help="one line, shown in listings")
+    p.add_argument("--projects", help="comma-separated project slugs")
+    p.add_argument("--tags", help=f"comma-separated, from: {', '.join(services.WORKLOG_TAGS)}")
+    p.add_argument("--session", type=int, help="worklog session to link and mark processed")
+    p.set_defaults(func=cmd_worklog_add)
+
+    p = wl_sub.add_parser("list", help="index rows: date, projects, tags, summary, path")
+    p.add_argument("--month", help="YYYY-MM")
+    p.add_argument("--from", dest="from", help="ISO date lower bound")
+    p.add_argument("--to", help="ISO date upper bound")
+    p.add_argument("--tag", choices=list(services.WORKLOG_TAGS))
+    p.add_argument("--project")
+    p.add_argument("--limit", type=int, default=200)
+    p.set_defaults(func=cmd_worklog_list)
+
+    p = wl_sub.add_parser("show", help="print a daily entry (YYYY-MM-DD) or rollup (YYYY-MM)")
+    p.add_argument("date_or_month")
+    p.set_defaults(func=cmd_worklog_show)
+
+    rollup_p = wl_sub.add_parser("rollup", help="monthly rollups")
+    rollup_sub = rollup_p.add_subparsers(dest="rollup_action", required=True)
+    p = rollup_sub.add_parser("add", help="file a month's rollup (overwrites: it is derived)")
+    p.add_argument("--month", required=True, help="YYYY-MM")
+    p.add_argument("--markdown", required=True, help="path to the rollup markdown")
+    p.set_defaults(func=cmd_worklog_rollup_add)
+    rollup_sub.add_parser("status", help="completed months lacking a rollup").set_defaults(
+        func=cmd_worklog_rollup_status
+    )
 
     # suggestions
     req_p = sub.add_parser("requests", help="frontend requests for topic suggestions")
