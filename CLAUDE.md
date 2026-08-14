@@ -152,7 +152,8 @@ It touches six places, and missing one produces a silently wrong `overall`:
 ## Reference
 
 - `PRD.md` — the specification this implements
+- `PRD-worklog.md` — the worklog / interview-story extension (not yet built)
 - `docs/commands.md` — every skill and `ect` command, with payload shapes
 - `docs/rubric.md` — scoring anchors; read before scoring anything
 - `docs/setup.md` — prerequisites, VRAM ladder, config env vars, troubleshooting
-- `docs/adr/` — the three load-bearing decisions and the alternatives rejected
+- `docs/adr/` — the load-bearing decisions and the alternatives rejected
