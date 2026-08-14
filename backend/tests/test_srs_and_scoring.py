@@ -55,9 +55,12 @@ class TestReview:
 
 class TestMastery:
     def test_new_word_is_unmastered(self):
-        assert compute_mastery(
-            repetitions=0, ease=2.5, interval_days=0, times_seen=0, times_used_correctly=0
-        ) == 0.0
+        assert (
+            compute_mastery(
+                repetitions=0, ease=2.5, interval_days=0, times_seen=0, times_used_correctly=0
+            )
+            == 0.0
+        )
 
     def test_mastery_rises_with_streak_and_interval(self):
         low = compute_mastery(

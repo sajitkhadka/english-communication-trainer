@@ -72,9 +72,7 @@ def review(
     repetitions = int((word or {}).get("repetitions") or 0)
     interval = int((word or {}).get("interval_days") or 0)
     times_seen = int((word or {}).get("times_seen") or 0) + 1
-    times_correct = int((word or {}).get("times_used_correctly") or 0) + (
-        1 if quality >= 4 else 0
-    )
+    times_correct = int((word or {}).get("times_used_correctly") or 0) + (1 if quality >= 4 else 0)
 
     if quality < PASS_THRESHOLD:
         # Lapse: bring it straight back. A misuse (q=2) is worth one more day than a

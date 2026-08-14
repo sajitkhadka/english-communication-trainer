@@ -23,8 +23,11 @@ class TestSessions:
     def test_create_and_fetch(self, client):
         created = client.post(
             "/api/sessions",
-            json={"mode": "recommended", "topic": "Describe a bottleneck",
-                  "target_words": ["leverage"]},
+            json={
+                "mode": "recommended",
+                "topic": "Describe a bottleneck",
+                "target_words": ["leverage"],
+            },
         )
         assert created.status_code == 201
         session_id = created.json()["id"]
@@ -54,9 +57,9 @@ class TestSessions:
         assert client.get("/api/sessions/999").status_code == 404
 
     def test_delete_removes_the_session_and_its_files(self, client, data_dir: Path):
-        session_id = client.post(
-            "/api/sessions", json={"mode": "freeform", "topic": "t"}
-        ).json()["id"]
+        session_id = client.post("/api/sessions", json={"mode": "freeform", "topic": "t"}).json()[
+            "id"
+        ]
         client.post(
             f"/api/sessions/{session_id}/recording",
             files={"file": ("clip.webm", b"audio-bytes", "audio/webm")},
@@ -111,9 +114,9 @@ class TestProcessQueue:
         from app.config import settings
 
         monkeypatch.setattr(settings, "transcribe_on_upload", False)
-        session_id = client.post(
-            "/api/sessions", json={"mode": "freeform", "topic": "t"}
-        ).json()["id"]
+        session_id = client.post("/api/sessions", json={"mode": "freeform", "topic": "t"}).json()[
+            "id"
+        ]
         client.post(
             f"/api/sessions/{session_id}/recording",
             files={"file": ("clip.webm", b"audio-bytes", "audio/webm")},
@@ -130,9 +133,9 @@ class TestProcessQueue:
         from app.config import settings
 
         monkeypatch.setattr(settings, "transcribe_on_upload", True)
-        session_id = client.post(
-            "/api/sessions", json={"mode": "freeform", "topic": "t"}
-        ).json()["id"]
+        session_id = client.post("/api/sessions", json={"mode": "freeform", "topic": "t"}).json()[
+            "id"
+        ]
         client.post(
             f"/api/sessions/{session_id}/recording",
             files={"file": ("clip.webm", b"not-audio", "audio/webm")},
@@ -149,9 +152,9 @@ class TestProcessQueue:
         assert queue["pending"][0]["id"] == recorded_id
 
     def test_cannot_process_a_session_with_no_recording(self, client):
-        session_id = client.post(
-            "/api/sessions", json={"mode": "freeform", "topic": "t"}
-        ).json()["id"]
+        session_id = client.post("/api/sessions", json={"mode": "freeform", "topic": "t"}).json()[
+            "id"
+        ]
         assert client.post(f"/api/sessions/{session_id}/process").status_code == 409
 
     def test_transcript_is_409_until_the_pipeline_has_run(self, client, recorded_id):
@@ -249,40 +252,95 @@ FAKE_TRANSCRIPT = {
     "transcript": {
         "text": "So, we had a bottleneck. I leveraged a queue.",
         "sentences": [
-            {"i": 0, "text": "So, we had a bottleneck.", "start": 0.0, "end": 2.2,
-             "words": 5, "wpm": 136.0},
-            {"i": 1, "text": "I leveraged a queue.", "start": 3.0, "end": 4.3,
-             "words": 4, "wpm": 184.0},
+            {
+                "i": 0,
+                "text": "So, we had a bottleneck.",
+                "start": 0.0,
+                "end": 2.2,
+                "words": 5,
+                "wpm": 136.0,
+            },
+            {
+                "i": 1,
+                "text": "I leveraged a queue.",
+                "start": 3.0,
+                "end": 4.3,
+                "words": 4,
+                "wpm": 184.0,
+            },
         ],
         "words": [{"w": "So,", "s": 0.0, "e": 0.3}, {"w": "leveraged", "s": 3.1, "e": 3.7}],
     },
     "speech": {
-        "words_total": 9, "wpm_overall": 120.0, "wpm_speaking": 146.0, "speaking_sec": 3.7,
-        "silence_sec": 0.8, "speech_ratio": 0.82, "sentence_count": 2, "avg_sentence_words": 4.5,
+        "words_total": 9,
+        "wpm_overall": 120.0,
+        "wpm_speaking": 146.0,
+        "speaking_sec": 3.7,
+        "silence_sec": 0.8,
+        "speech_ratio": 0.82,
+        "sentence_count": 2,
+        "avg_sentence_words": 4.5,
     },
     "pauses": {
-        "count": 1, "per_minute": 13.3, "total_sec": 0.8, "longest_sec": 0.8,
-        "mid_sentence_count": 0, "buckets": {"short_0.3_0.7": 0, "medium_0.7_1.5": 1,
-                                             "long_1.5_plus": 0},
-        "items": [{"start": 2.2, "dur": 0.8, "after_word": "bottleneck.", "sentence": 0,
-                   "mid_sentence": False}],
+        "count": 1,
+        "per_minute": 13.3,
+        "total_sec": 0.8,
+        "longest_sec": 0.8,
+        "mid_sentence_count": 0,
+        "buckets": {"short_0.3_0.7": 0, "medium_0.7_1.5": 1, "long_1.5_plus": 0},
+        "items": [
+            {
+                "start": 2.2,
+                "dur": 0.8,
+                "after_word": "bottleneck.",
+                "sentence": 0,
+                "mid_sentence": False,
+            }
+        ],
     },
     "fillers": {
-        "textual": {"total": 1, "hard_total": 0, "ambiguous_total": 1, "per_minute": 13.3,
-                    "by_term": {"so": 1},
-                    "items": [{"term": "so", "start": 0.0, "ambiguous": True, "word_index": 0}]},
-        "acoustic": {"total": 1, "per_minute": 13.3, "note": "…",
-                     "items": [{"start": 2.4, "dur": 0.5, "word_coverage": 0.0,
-                                "after_word": "bottleneck.", "sentence": 0}]},
-        "combined_total": 1, "combined_per_minute": 13.3,
+        "textual": {
+            "total": 1,
+            "hard_total": 0,
+            "ambiguous_total": 1,
+            "per_minute": 13.3,
+            "by_term": {"so": 1},
+            "items": [{"term": "so", "start": 0.0, "ambiguous": True, "word_index": 0}],
+        },
+        "acoustic": {
+            "total": 1,
+            "per_minute": 13.3,
+            "note": "…",
+            "items": [
+                {
+                    "start": 2.4,
+                    "dur": 0.5,
+                    "word_coverage": 0.0,
+                    "after_word": "bottleneck.",
+                    "sentence": 0,
+                }
+            ],
+        },
+        "combined_total": 1,
+        "combined_per_minute": 13.3,
     },
     "target_word_hits": [
-        {"term": "leverage", "found": True, "count": 1,
-         "occurrences": [{"start": 3.1, "said_as": "leveraged", "sentence": 1}]}
+        {
+            "term": "leverage",
+            "found": True,
+            "count": 1,
+            "occurrences": [{"start": 3.1, "said_as": "leveraged", "sentence": 1}],
+        }
     ],
     "meta": {
-        "pipeline_version": 1, "model": "large-v3", "compute_type": "int8_float16",
-        "aligned": True, "language": "en", "vad": "silero", "elapsed_sec": 8.1,
-        "generated_at": "2026-07-30T10:00:00+00:00", "thresholds": {},
+        "pipeline_version": 1,
+        "model": "large-v3",
+        "compute_type": "int8_float16",
+        "aligned": True,
+        "language": "en",
+        "vad": "silero",
+        "elapsed_sec": 8.1,
+        "generated_at": "2026-07-30T10:00:00+00:00",
+        "thresholds": {},
     },
 }

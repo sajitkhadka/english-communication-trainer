@@ -202,9 +202,7 @@ def _render_history(recent_scores: list[dict[str, Any]] | None) -> list[str]:
     if not recent_scores:
         return []
     trail = " -> ".join(
-        f"S{s['session_id']} {s['overall']}"
-        for s in recent_scores
-        if s.get("overall") is not None
+        f"S{s['session_id']} {s['overall']}" for s in recent_scores if s.get("overall") is not None
     )
     return [
         "## Recent overall scores (for continuity, not for grading on a curve)",
@@ -261,11 +259,7 @@ def _annotations_by_sentence(transcript: dict[str, Any], count: int) -> dict[int
         where = f' after "{item["after_word"]}"' if item.get("after_word") else ""
         notes.setdefault(idx, []).append(f"hesitation {item['dur']}s{where} (untranscribed)")
 
-    return {
-        k: _dedupe(v)
-        for k, v in notes.items()
-        if k is not None and 0 <= k < max(count, 1)
-    }
+    return {k: _dedupe(v) for k, v in notes.items() if k is not None and 0 <= k < max(count, 1)}
 
 
 def _dedupe(items: list[str]) -> list[str]:
@@ -295,11 +289,9 @@ def brief_for_session(
             row = dbmod.get_word_by_term(conn, term)
             if row:
                 word_meta[term.lower()] = row
-        recent = [
-            s
-            for s in dbmod.score_history(conn, limit=200)
-            if s["session_id"] != session_id
-        ][-history:]
+        recent = [s for s in dbmod.score_history(conn, limit=200) if s["session_id"] != session_id][
+            -history:
+        ]
     return build_markdown(
         transcript,
         word_meta=word_meta,

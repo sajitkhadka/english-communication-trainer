@@ -259,9 +259,7 @@ def find_hesitations(
     never made it into the transcript.
     """
     min_duration = settings.min_hesitation_sec if min_duration is None else min_duration
-    max_coverage = (
-        settings.hesitation_max_word_coverage if max_coverage is None else max_coverage
-    )
+    max_coverage = settings.hesitation_max_word_coverage if max_coverage is None else max_coverage
     timed = [w for w in words if w.start is not None and w.end is not None]
     out: list[Hesitation] = []
 

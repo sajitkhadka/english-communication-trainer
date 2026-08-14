@@ -123,10 +123,7 @@ def build_payload(
             ],
             # Word-level timings power subtitle sync in the frontend. The skill reads
             # the slim brief instead (see pipeline/brief.py), so this costs no tokens.
-            "words": [
-                {"w": w.word, "s": w.start, "e": w.end}
-                for w in result.words
-            ],
+            "words": [{"w": w.word, "s": w.start, "e": w.end} for w in result.words],
         },
         "speech": {
             "words_total": analysis.word_count,
@@ -136,9 +133,7 @@ def build_payload(
             "silence_sec": analysis.silence_sec,
             "speech_ratio": round(speaking / duration, 3) if duration else None,
             "sentence_count": len(analysis.sentences),
-            "avg_sentence_words": round(
-                analysis.word_count / len(analysis.sentences), 1
-            )
+            "avg_sentence_words": round(analysis.word_count / len(analysis.sentences), 1)
             if analysis.sentences
             else None,
         },

@@ -97,7 +97,7 @@ class TestQueue:
             services.enqueue(session["id"])
 
     def test_a_failed_transcription_leaves_the_session_unqueued(self, services, monkeypatch):
-        """"Queued for Claude" has to mean there is something for Claude to read."""
+        """ "Queued for Claude" has to mean there is something for Claude to read."""
         from app.config import settings
         from app.paths import queue_marker
 
@@ -145,16 +145,26 @@ class TestRecordFeedback:
         return {
             "session_id": session_id,
             "scores": {
-                "vocab_range": 6.0, "filler_density": 5.0, "fluency": 6.0,
-                "grammar": 7.0, "structure": 6.0, "coherence": 7.0, "target_usage": 5.0,
+                "vocab_range": 6.0,
+                "filler_density": 5.0,
+                "fluency": 6.0,
+                "grammar": 7.0,
+                "structure": 6.0,
+                "coherence": 7.0,
+                "target_usage": 5.0,
             },
             "target_words": [
                 {"term": "leverage", "used": True, "used_correctly": True},
                 {"term": "mitigate", "used": False, "used_correctly": False},
             ],
             "new_words": [
-                {"term": "de-risk", "kind": "word", "meaning": "reduce risk",
-                 "example": "We de-risked it.", "source": "recommended"}
+                {
+                    "term": "de-risk",
+                    "kind": "word",
+                    "meaning": "reduce risk",
+                    "example": "We de-risked it.",
+                    "source": "recommended",
+                }
             ],
         }
 
