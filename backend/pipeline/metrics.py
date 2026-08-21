@@ -7,7 +7,7 @@ without a GPU.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from app.config import settings
@@ -62,6 +62,20 @@ class Hesitation:
     word_coverage: float
     after_word: str | None
     sentence_index: int | None
+    # Which sound this was, e.g. "um" - filled in later by `find_hidden_fillers`
+    # when a second ASR pass identifies what Whisper only heard as silence.
+    heard_as: str | None = None
+
+
+@dataclass
+class HiddenFiller:
+    """A filler/hesitation sound a second ASR pass heard that Whisper's own
+    output shows no trace of at all - not as transcript text, and not as an
+    acoustic hesitation either. See `find_hidden_fillers`."""
+
+    term: str
+    start: float
+    sentence_index: int | None
 
 
 @dataclass
@@ -70,6 +84,10 @@ class TargetHit:
     found: bool
     count: int
     occurrences: list[dict[str, Any]] = field(default_factory=list)
+    # Which ASR pass(es) heard this term. "whisper" means it is located in the
+    # transcript Claude reads; a term found only by a cross-check pass (e.g.
+    # "parakeet") has no located occurrence - see `apply_cross_check`.
+    confirmed_by: list[str] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -289,6 +307,65 @@ def find_hesitations(
     return out
 
 
+def find_hidden_fillers(
+    parakeet_words: list[Word],
+    whisper_fillers: list[FillerHit],
+    whisper_hesitations: list[Hesitation],
+    sentences: list[Sentence],
+    *,
+    match_window: float = 1.0,
+) -> tuple[list[Hesitation], list[HiddenFiller]]:
+    """Reconcile a second ASR pass's filler/hesitation sounds against what Whisper
+    already reports, in two ways depending on what Whisper has for that moment:
+
+    - An acoustic hesitation already flags *something* there, but only as an
+      untranscribed span - Whisper never says what it was. The second pass's term
+      enriches that same entry (`heard_as`) rather than adding a duplicate.
+    - Nothing is there at all - the failure mode neither the transcript text nor
+      the acoustic-hesitation layer catches, because a real self-correction
+      ("and it's uh, this is...") got smoothed into clean prose *and* word-aligned
+      across, so `find_hesitations` sees full coverage and reports nothing. That
+      is genuinely new information, returned as a `HiddenFiller`.
+
+    Nothing is ever dropped: every sound the second pass hears either enriches an
+    existing entry or is reported as a new one.
+    """
+    # Padded: Whisper's and Parakeet's boundaries for the same acoustic event
+    # routinely differ by tens of milliseconds since the two models decode
+    # independently - an exact-window check would treat that as two events.
+    filler_windows = [
+        (h.start - match_window, h.start + match_window)
+        for h in whisper_fillers
+        if h.start is not None
+    ]
+    hesitations = list(whisper_hesitations)
+    hidden: list[HiddenFiller] = []
+
+    for hit in find_textual_fillers(parakeet_words):
+        if hit.start is None:
+            continue
+        matched = next(
+            (
+                i
+                for i, h in enumerate(hesitations)
+                if h.heard_as is None
+                and h.start - match_window <= hit.start <= h.end + match_window
+            ),
+            None,
+        )
+        if matched is not None:
+            hesitations[matched] = replace(hesitations[matched], heard_as=hit.term)
+        elif not any(lo <= hit.start <= hi for lo, hi in filler_windows):
+            hidden.append(
+                HiddenFiller(
+                    term=hit.term,
+                    start=hit.start,
+                    sentence_index=sentence_index_at(sentences, hit.start),
+                )
+            )
+    return hesitations, hidden
+
+
 # --------------------------------------------------------------------------- #
 # target words
 # --------------------------------------------------------------------------- #
@@ -347,9 +424,49 @@ def check_target_words(
                 found=bool(occurrences),
                 count=len(occurrences),
                 occurrences=occurrences,
+                confirmed_by=["whisper"] if occurrences else [],
             )
         )
     return hits
+
+
+def target_words_in_tokens(terms: list[str], tokens: list[str]) -> set[str]:
+    """Which of `terms` appear anywhere in a flat word list, using the same
+    lenient stem/phrase matching as `check_target_words` - for cross-checking
+    against a second ASR pass that carries no per-word timing."""
+    norm_tokens = [normalise(t) for t in tokens]
+    stems = [_stem(t) for t in norm_tokens]
+    found: set[str] = set()
+    for term in terms:
+        parts = [normalise(p) for p in term.split() if normalise(p)]
+        if not parts:
+            continue
+        span = len(parts)
+        target_stems = [_stem(p) for p in parts]
+        for i in range(len(norm_tokens) - span + 1):
+            if norm_tokens[i : i + span] == parts or stems[i : i + span] == target_stems:
+                found.add(term)
+                break
+    return found
+
+
+def apply_cross_check(
+    hits: list[TargetHit], heard_tokens: list[str], *, source: str = "parakeet"
+) -> list[TargetHit]:
+    """Mark target words a second ASR pass heard that Whisper's transcript missed.
+
+    Whisper stays the transcript Claude reads: this only flips `found` for a term
+    Whisper dropped, and never invents a sentence location for it - the brief
+    renders those as unverified so Claude does not treat a phantom citation as
+    real context.
+    """
+    present = target_words_in_tokens([h.term for h in hits], heard_tokens)
+    return [
+        replace(h, found=True, count=max(h.count, 1), confirmed_by=[*h.confirmed_by, source])
+        if h.term in present and source not in h.confirmed_by
+        else h
+        for h in hits
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -368,6 +485,9 @@ class Analysis:
     silence_sec: float
     duration_sec: float
     word_count: int
+    # Populated after the fact by the cross-check pass (see pipeline/runner.py) -
+    # `analyse()` itself never touches a second ASR model.
+    hidden_fillers: list[HiddenFiller] = field(default_factory=list)
 
 
 def analyse(

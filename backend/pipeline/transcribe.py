@@ -7,7 +7,7 @@ to reload `large-v3` per request, and the alignment model must coexist with it.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -169,12 +169,31 @@ def _f(value: Any) -> float | None:
         return None
 
 
-def transcribe(audio: np.ndarray, *, align: bool | None = None) -> TranscriptionResult:
-    """Transcribe mono 16 kHz float32 audio, then force-align for word timings."""
+def transcribe(
+    audio: np.ndarray,
+    *,
+    align: bool | None = None,
+    target_words: list[str] | None = None,
+) -> TranscriptionResult:
+    """Transcribe mono 16 kHz float32 audio, then force-align for word timings.
+
+    `target_words` are the session's practice vocabulary, known before the recording
+    even starts. They're passed to Whisper as `hotwords` so its language-model prior
+    is biased toward the exact word being practiced instead of "correcting" it to
+    something more common-sounding - the failure mode this app can least afford,
+    since target-word usage is graded from the transcript.
+    """
     import whisperx
 
     should_align = settings.align if align is None else align
     model, compute_type = load_asr()
+    # The pipeline is cached and reused across sessions (module-level dict above), so
+    # its options must be set fresh per call rather than at load time. Safe to mutate:
+    # `services.transcribe_session` holds a process-wide GPU lock, so only one
+    # transcription touches this object at a time.
+    model.options = replace(
+        model.options, hotwords=", ".join(target_words) if target_words else None
+    )
 
     result = model.transcribe(audio, batch_size=settings.batch_size)
     language = result.get("language") or settings.language

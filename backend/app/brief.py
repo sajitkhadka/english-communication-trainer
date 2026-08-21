@@ -141,6 +141,15 @@ def _render_measurements(transcript: dict[str, Any]) -> list[str]:
         f"{_num(fillers.get('combined_per_minute'))}/min "
         f"({_num(fillers.get('combined_total'))} total)"
     )
+    cross_check = fillers.get("cross_check") or {}
+    if cross_check.get("total"):
+        lines.append(
+            f"- **Cross-check fillers:** {_num(cross_check.get('total'))} more "
+            f"({_num(cross_check.get('per_minute'))}/min) - a second speech-recognition "
+            f"pass heard these but Whisper's transcript has no trace of them at all, text "
+            f"or acoustic. Not counted in the combined rate above; use your judgement on "
+            f"whether they should push fluency down further (see the `S#` markers below)."
+        )
     lines.append("")
     return lines
 
@@ -153,6 +162,15 @@ def _render_target_words(transcript: dict[str, Any]) -> list[str]:
     for hit in hits:
         if not hit.get("found"):
             lines.append(f"- `{hit['term']}` - **NOT USED**")
+            continue
+        if not hit.get("occurrences"):
+            # A cross-check ASR pass heard it, but it isn't in this transcript at
+            # all - Whisper dropped it entirely, so there is no sentence to cite.
+            lines.append(
+                f"- `{hit['term']}` - **USED (unverified)**: a second speech-recognition "
+                f"pass heard it, but it does not appear in the transcript below, so there "
+                f"is no sentence to judge correctness from. Treat it as likely spoken."
+            )
             continue
         where = ", ".join(
             f"S{o['sentence'] + 1}" if o.get("sentence") is not None else "S?"
@@ -257,7 +275,18 @@ def _annotations_by_sentence(transcript: dict[str, Any], count: int) -> dict[int
         if idx is None:
             continue
         where = f' after "{item["after_word"]}"' if item.get("after_word") else ""
-        notes.setdefault(idx, []).append(f"hesitation {item['dur']}s{where} (untranscribed)")
+        heard = f', heard as "{item["heard_as"]}"' if item.get("heard_as") else ""
+        notes.setdefault(idx, []).append(f"hesitation {item['dur']}s{where} (untranscribed{heard})")
+
+    for item in transcript.get("fillers", {}).get("cross_check", {}).get("items", []):
+        idx = item.get("sentence")
+        if idx is None:
+            idx = bucket_for_time(item.get("start"))
+        if idx is None:
+            continue
+        notes.setdefault(idx, []).append(
+            f'cross-check: "{item["term"]}" (not in this transcript at all)'
+        )
 
     return {k: _dedupe(v) for k, v in notes.items() if k is not None and 0 <= k < max(count, 1)}
 

@@ -167,16 +167,24 @@ export interface Transcript {
         word_coverage: number;
         after_word: string | null;
         sentence: number | null;
+        heard_as: string | null;
       }[];
     };
     combined_total: number;
     combined_per_minute: number | null;
+    cross_check: {
+      total: number;
+      per_minute: number | null;
+      note: string;
+      items: { term: string; start: number; sentence: number | null }[];
+    };
   };
   target_word_hits: {
     term: string;
     found: boolean;
     count: number;
     occurrences: { start: number | null; said_as: string; sentence: number | null }[];
+    confirmed_by: string[];
   }[];
   meta: {
     pipeline_version: number;
@@ -185,6 +193,7 @@ export interface Transcript {
     aligned: boolean;
     language: string;
     vad: string;
+    target_word_cross_check: string | null;
     elapsed_sec: number;
     generated_at: string;
     thresholds: Record<string, number>;

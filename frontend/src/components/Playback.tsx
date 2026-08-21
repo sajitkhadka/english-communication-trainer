@@ -74,7 +74,11 @@ export default function Playback({ sessionId, transcript }: { sessionId: number;
       push(item.sentence ?? sentenceAt(sentences, item.start), `pause ${item.dur}s`);
     }
     for (const item of transcript.fillers.acoustic.items) {
-      push(item.sentence ?? sentenceAt(sentences, item.start), `hesitation ${item.dur}s`);
+      const label = item.heard_as ? `hesitation ${item.dur}s (heard as "${item.heard_as}")` : `hesitation ${item.dur}s`;
+      push(item.sentence ?? sentenceAt(sentences, item.start), label);
+    }
+    for (const item of transcript.fillers.cross_check.items) {
+      push(item.sentence ?? sentenceAt(sentences, item.start), `cross-check "${item.term}"`);
     }
     return map;
   }, [transcript, sentences]);
@@ -208,8 +212,8 @@ export function PauseMap({
             className="seg hesitation"
             style={{ left: pct(hesitation.start), width: `max(3px, ${pct(hesitation.dur)})` }}
             title={`${hesitation.dur}s vocalized hesitation${
-              hesitation.after_word ? ` after "${hesitation.after_word}"` : ""
-            }`}
+              hesitation.heard_as ? ` (heard as "${hesitation.heard_as}")` : ""
+            }${hesitation.after_word ? ` after "${hesitation.after_word}"` : ""}`}
           />
         ))}
         <div className="cursor" style={{ left: pct(time) }} />

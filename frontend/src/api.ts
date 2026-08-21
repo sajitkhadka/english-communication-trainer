@@ -83,7 +83,10 @@ export const api = {
   brief: (id: number) => request<string>(`/sessions/${id}/brief`),
   audioUrl: (id: number) => `${BASE}/sessions/${id}/audio`,
 
-  process: (id: number) => request<ProcessResponse>(`/sessions/${id}/process`, { method: "POST" }),
+  process: (id: number, force = false) =>
+    request<ProcessResponse>(`/sessions/${id}/process${force ? "?force=true" : ""}`, {
+      method: "POST",
+    }),
   transcribe: (id: number) =>
     request<Record<string, unknown>>(`/sessions/${id}/transcribe`, { method: "POST" }),
 

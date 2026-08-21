@@ -195,10 +195,10 @@ def get_prompt(session_id: int) -> Any:
 
 
 @router.post("/{session_id}/process", response_model=ProcessResponse)
-def process(session_id: int) -> Any:
+def process(session_id: int, force: bool = False) -> Any:
     """PRD 6.3: flag intent. Claude is pulled by the user, never pushed by the app."""
     try:
-        return services.enqueue(session_id)
+        return services.enqueue(session_id, force=force)
     except services.WorkflowError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

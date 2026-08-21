@@ -255,7 +255,9 @@ NOT_QUEUED_HINT = (
 )
 
 
-def enqueue(session_id: int, *, transcribe: bool | None = None) -> dict[str, Any]:
+def enqueue(
+    session_id: int, *, transcribe: bool | None = None, force: bool = False
+) -> dict[str, Any]:
     """Frontend "Process" button: transcribe, then flag for the next skill run.
 
     Transcription is backend work with no Claude involvement, so it happens here
@@ -263,6 +265,10 @@ def enqueue(session_id: int, *, transcribe: bool | None = None) -> dict[str, Any
     `pending` once the transcript exists: "queued for Claude" has to mean Claude
     can actually read the recording, otherwise a failed GPU run leaves a session
     advertised in the queue that `/process-session` cannot do anything with.
+
+    `force` re-runs transcription even if a transcript already exists - the
+    frontend's "Process again" / "Re-queue" buttons, for a session whose transcript
+    predates a pipeline change (e.g. new target-word hints) and is worth redoing.
     """
     from .config import settings
 
@@ -278,9 +284,9 @@ def enqueue(session_id: int, *, transcribe: bool | None = None) -> dict[str, Any
 
     should = settings.transcribe_on_upload if transcribe is None else transcribe
     result: dict[str, Any] = {"session_id": session_id, "status": session["status"]}
-    if should and not transcript_path(session_id).is_file():
+    if should and (force or not transcript_path(session_id).is_file()):
         try:
-            result["transcription"] = transcribe_session(session_id)
+            result["transcription"] = transcribe_session(session_id, force=force)
         except Exception as exc:  # leave the session un-queued; surface the failure
             result["transcription_error"] = str(exc)
 

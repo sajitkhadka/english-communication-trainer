@@ -33,12 +33,12 @@ export default function Sessions({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
 
-  const queueForClaude = async (id: number) => {
+  const queueForClaude = async (id: number, force = false) => {
     if (busy !== null) return;
     setBusy(id);
     setError(null);
     try {
-      const result = await api.process(id);
+      const result = await api.process(id, force);
       if (result.transcription_error) {
         setError(`Transcription failed: ${result.transcription_error}`);
       } else if (!result.queued) {
@@ -124,13 +124,19 @@ export default function Sessions({
                       <StatusPill status={session.status} />
                     </td>
                     <td>
-                      {session.status === "recorded" && (
+                      {(session.status === "recorded" || session.status === "pending") && (
                         <button
-                          className="primary"
-                          onClick={() => queueForClaude(session.id)}
+                          className={session.status === "recorded" ? "primary" : undefined}
+                          onClick={() =>
+                            queueForClaude(session.id, session.status === "pending")
+                          }
                           disabled={busy !== null}
                         >
-                          {busy === session.id ? "Transcribing…" : "Process"}
+                          {busy === session.id
+                            ? "Transcribing…"
+                            : session.status === "recorded"
+                              ? "Process"
+                              : "Process again"}
                         </button>
                       )}
                       {session.status === "awaiting_recording" && (

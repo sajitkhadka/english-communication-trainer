@@ -11,10 +11,33 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-# Unambiguous hesitation sounds.
+# Unambiguous hesitation sounds. Kept as canonical spellings for reference; matching
+# itself goes through _HARD_FILLER_RE below.
 HARD_FILLERS: tuple[str, ...] = (
     "um", "umm", "uhm", "uh", "uhh", "er", "erm", "ah", "ahh", "eh", "hmm", "hm", "mmm",
 )  # fmt: skip
+
+# Hesitation sounds are vocalized with arbitrary elongation - "um", "ummm" and
+# "ummmmm" are the same sound to a listener, and to WhisperX's decoder, which is free
+# to pick any of them. An enumerated spelling list silently misses whichever one it
+# didn't guess, so hard fillers are matched as letter-repetition patterns instead.
+_HARD_FILLER_RE: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p)
+    for p in (
+        r"u+h*m+",  # um, umm, uhm, ummm, uuhmm...
+        r"u+h+",    # uh, uhh, uuhh...
+        r"e+r+m*",  # er, err, erm, erm...
+        r"a+h+",    # ah, ahh, aah...
+        r"e+h+",    # eh, ehh, eeh...
+        r"h+m+",    # hm, hmm, hhmm...
+        r"m{2,}",   # bare mmm (2+ so a lone "m" initial isn't swept in)
+    )
+)  # fmt: skip
+
+
+def _is_hard_filler(token: str) -> bool:
+    return any(pattern.fullmatch(token) for pattern in _HARD_FILLER_RE)
+
 
 # Discourse markers that are often filler but can be legitimate. Flagged, not condemned.
 SOFT_FILLERS: tuple[str, ...] = (
@@ -77,7 +100,7 @@ def find_textual_fillers(words: list) -> list[FillerHit]:
     for i, token in enumerate(tokens):
         if i in consumed or not token:
             continue
-        if token in HARD_FILLERS:
+        if _is_hard_filler(token):
             hits.append(FillerHit(token, words[i].start, words[i].end, i, False))
         elif token in SOFT_FILLERS:
             hits.append(FillerHit(token, words[i].start, words[i].end, i, True))

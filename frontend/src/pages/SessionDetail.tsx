@@ -44,11 +44,11 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
 
   const data = session.data;
 
-  const queueForClaude = async () => {
+  const queueForClaude = async (force = false) => {
     setBusy(true);
     setError(null);
     try {
-      const result = await api.process(sessionId);
+      const result = await api.process(sessionId, force);
       if (result.transcription_error) {
         setError(`Transcription failed: ${result.transcription_error}`);
       } else if (!result.queued) {
@@ -99,9 +99,21 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
         </div>
         <div className="btn-row">
           <StatusPill status={data.status} />
-          {(data.status === "recorded" || data.status === "processed") && (
-            <button className="primary" onClick={queueForClaude} disabled={busy}>
-              {busy ? "Transcribing…" : data.status === "processed" ? "Re-queue" : "Process"}
+          {(data.status === "recorded" ||
+            data.status === "pending" ||
+            data.status === "processed") && (
+            <button
+              className={data.status === "recorded" ? "primary" : undefined}
+              onClick={() => queueForClaude(data.status !== "recorded")}
+              disabled={busy}
+            >
+              {busy
+                ? "Transcribing…"
+                : data.status === "recorded"
+                  ? "Process"
+                  : data.status === "pending"
+                    ? "Process again"
+                    : "Re-queue"}
             </button>
           )}
           <button className="danger" onClick={remove}>
@@ -154,7 +166,21 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
                       <td className="small muted">{word.kind ?? "—"}</td>
                       <td className="small">{word.meaning ?? "—"}</td>
                       <td className="small">
-                        {hit ? (hit.found ? `yes (${hit.count}×)` : "no") : "—"}
+                        {hit ? (
+                          hit.found ? (
+                            hit.confirmed_by.includes("whisper") ? (
+                              `yes (${hit.count}×)`
+                            ) : (
+                              <span title="Heard by a second speech-recognition pass, but not in the main transcript - unverified.">
+                                yes (unverified)
+                              </span>
+                            )
+                          ) : (
+                            "no"
+                          )
+                        ) : (
+                          "—"
+                        )}
                       </td>
                     </tr>
                   );

@@ -3,14 +3,20 @@ which is exactly why it was written to take them rather than reach for the audio
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from pipeline.fillers import find_textual_fillers
 from pipeline.metrics import (
+    Hesitation,
     analyse,
+    apply_cross_check,
     check_target_words,
     find_hesitations,
+    find_hidden_fillers,
     segment_sentences,
+    target_words_in_tokens,
     word_at_or_before,
     wpm,
 )
@@ -82,6 +88,20 @@ class TestFillers:
         words = words_from([("Um,", 0.0, 0.3), ("UH!", 0.3, 0.6)])
         assert {hit.term for hit in find_textual_fillers(words)} == {"um", "uh"}
 
+    def test_elongated_spellings_are_still_caught(self):
+        """WhisperX is free to pick any spelling for a hesitation sound - an enumerated
+        list would silently miss whichever one it didn't guess."""
+        words = words_from(
+            [
+                ("Ummm,", 0.0, 0.3),
+                ("uhhh", 0.3, 0.6),
+                ("hmmmm", 0.6, 0.9),
+                ("errm", 0.9, 1.1),
+            ]
+        )
+        hits = {hit.term: hit.ambiguous for hit in find_textual_fillers(words)}
+        assert hits == {"ummm": False, "uhhh": False, "hmmmm": False, "errm": False}
+
 
 class TestHesitations:
     def test_voiced_span_without_words_is_a_hesitation(self):
@@ -141,6 +161,41 @@ class TestTargetWords:
         hits = check_target_words(["de-risked"], words, segment_sentences(words))
         assert hits[0].found is True
 
+    def test_found_hit_is_confirmed_by_whisper(self):
+        hits = check_target_words(["leverage"], SAMPLE, segment_sentences(SAMPLE))
+        assert hits[0].confirmed_by == ["whisper"]
+
+    def test_missing_hit_has_no_confirmation(self):
+        hits = check_target_words(["mitigate"], SAMPLE, segment_sentences(SAMPLE))
+        assert hits[0].confirmed_by == []
+
+
+class TestCrossCheck:
+    def test_finds_inflected_and_multiword_terms(self):
+        heard = ["we", "de-risked", "it", "and", "leveraged", "a", "queue"]
+        found = target_words_in_tokens(["de-risk", "leverage", "mitigate"], heard)
+        assert found == {"de-risk", "leverage"}
+
+    def test_upgrades_a_hit_whisper_missed(self):
+        hits = check_target_words(["leverage", "mitigate"], SAMPLE, segment_sentences(SAMPLE))
+        assert [h.found for h in hits] == [True, False]
+
+        updated = apply_cross_check(hits, ["we", "should", "mitigate", "the", "risk"])
+
+        mitigate = next(h for h in updated if h.term == "mitigate")
+        assert mitigate.found is True
+        assert mitigate.count == 1
+        assert mitigate.occurrences == []  # heard, but not located in the transcript
+        assert mitigate.confirmed_by == ["parakeet"]
+        # A hit Whisper already found is untouched, not double-counted.
+        leverage = next(h for h in updated if h.term == "leverage")
+        assert leverage == hits[0]
+
+    def test_does_not_touch_a_hit_neither_pass_heard(self):
+        hits = check_target_words(["mitigate"], SAMPLE, segment_sentences(SAMPLE))
+        updated = apply_cross_check(hits, ["completely", "unrelated", "words"])
+        assert updated == hits
+
 
 class TestAnalyse:
     def test_end_to_end_over_synthetic_input(self):
@@ -169,3 +224,57 @@ class TestAnalyse:
         assert result.word_count == 10
         assert result.pauses == []
         assert result.speaking_sec > 0
+
+
+class TestHiddenFillers:
+    sentences = segment_sentences(SAMPLE)
+
+    def test_a_filler_neither_layer_caught_is_reported(self):
+        parakeet_words = words_from([("and", 2.4, 2.5), ("uh", 2.5, 2.7), ("well", 2.7, 2.9)])
+        hesitations, hidden = find_hidden_fillers(parakeet_words, [], [], self.sentences)
+        assert hesitations == []  # nothing to enrich - no hesitations were passed in
+        assert [h.term for h in hidden] == ["uh", "well"]
+        # 2.5s falls between the two SAMPLE sentences (2.2 and 3.0) - attached to
+        # the one still open at that point.
+        assert hidden[0].sentence_index == 0
+
+    def test_nothing_is_dropped_when_whisper_already_names_a_nearby_filler(self):
+        parakeet_words = words_from([("um", 0.55, 0.7)])
+        whisper_fillers = find_textual_fillers(SAMPLE)  # "um," at 0.5-0.8
+        hesitations, hidden = find_hidden_fillers(
+            parakeet_words, whisper_fillers, [], self.sentences
+        )
+        # Whisper's own transcript already names this one - not reported as new,
+        # and there is no hesitation entry to enrich either.
+        assert hidden == []
+        assert hesitations == []
+
+    def test_enriches_an_acoustic_hesitation_instead_of_duplicating_it(self):
+        parakeet_words = words_from([("uh", 5.1, 5.3)])
+        original = Hesitation(
+            start=5.0,
+            end=5.5,
+            duration=0.5,
+            word_coverage=0.0,
+            after_word=None,
+            sentence_index=None,
+        )
+        hesitations, hidden = find_hidden_fillers(parakeet_words, [], [original], self.sentences)
+        assert hidden == []
+        assert hesitations[0].heard_as == "uh"
+        # Nothing else about the original entry changes.
+        assert hesitations[0] == replace(original, heard_as="uh")
+
+    def test_a_second_hit_in_an_already_enriched_hesitation_is_reported_separately(self):
+        parakeet_words = words_from([("um", 5.1, 5.2), ("uh", 5.2, 5.4)])
+        original = Hesitation(
+            start=5.0,
+            end=5.5,
+            duration=0.5,
+            word_coverage=0.0,
+            after_word=None,
+            sentence_index=None,
+        )
+        hesitations, hidden = find_hidden_fillers(parakeet_words, [], [original], self.sentences)
+        assert hesitations[0].heard_as == "um"  # first hit claims the entry
+        assert [h.term for h in hidden] == ["uh"]  # second hit isn't silently lost

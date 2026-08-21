@@ -16,7 +16,8 @@ from app.config import settings
 from app.paths import transcript_path
 
 from .audio import duration_of, load_audio
-from .metrics import analyse, per_minute, wpm
+from .metrics import analyse, apply_cross_check, find_hidden_fillers, per_minute, wpm
+from .parakeet import transcribe_timed as parakeet_transcribe
 from .transcribe import transcribe
 from .vad import speech_spans
 
@@ -42,7 +43,7 @@ def run(
     audio = load_audio(audio_path)
     duration = duration_of(audio_path) or round(len(audio) / 16_000, 3)
 
-    result = transcribe(audio)
+    result = transcribe(audio, target_words=target_words)
     words = result.words
     spans = speech_spans(audio)
 
@@ -54,6 +55,25 @@ def run(
         target_words=target_words or [],
     )
 
+    # A second, independent ASR pass: catches target words Whisper's language-model
+    # prior corrected away, and disfluencies it smoothed into clean prose. Never
+    # allowed to fail the whole transcription - see pipeline/parakeet.py.
+    parakeet_pass = False
+    cross_check_engine: str | None = None
+    try:
+        parakeet_words = parakeet_transcribe(audio, spans=spans)
+        if parakeet_words:
+            parakeet_pass = True
+            if target_words:
+                heard = [w.word for w in parakeet_words]
+                analysis.target_hits = apply_cross_check(analysis.target_hits, heard)
+                cross_check_engine = "parakeet"
+            analysis.hesitations, analysis.hidden_fillers = find_hidden_fillers(
+                parakeet_words, analysis.textual_fillers, analysis.hesitations, analysis.sentences
+            )
+    except Exception:
+        log.warning("Parakeet cross-check pass failed, continuing without it", exc_info=True)
+
     payload = build_payload(
         session_id=session_id,
         mode=mode,
@@ -64,6 +84,8 @@ def run(
         analysis=analysis,
         audio_path=audio_path,
         elapsed=round(time.perf_counter() - started, 2),
+        cross_check_engine=cross_check_engine,
+        parakeet_pass=parakeet_pass,
     )
 
     if write:
@@ -85,6 +107,8 @@ def build_payload(
     analysis: Any,
     audio_path: Path,
     elapsed: float,
+    cross_check_engine: str | None = None,
+    parakeet_pass: bool = False,
 ) -> dict[str, Any]:
     duration = analysis.duration_sec
     speaking = analysis.speaking_sec or duration
@@ -177,7 +201,8 @@ def build_payload(
                 "per_minute": per_minute(len(analysis.hesitations), duration),
                 "note": (
                     "Voiced spans with (almost) no aligned words - vocalized fillers "
-                    "Whisper normalised out of the transcript."
+                    "Whisper normalised out of the transcript. `heard_as`, when present, "
+                    "is what a second ASR pass identified the sound as."
                 ),
                 "items": [
                     {
@@ -186,12 +211,28 @@ def build_payload(
                         "word_coverage": h.word_coverage,
                         "after_word": h.after_word,
                         "sentence": h.sentence_index,
+                        "heard_as": h.heard_as,
                     }
                     for h in analysis.hesitations
                 ],
             },
             "combined_total": filler_total,
             "combined_per_minute": per_minute(filler_total, duration),
+            "cross_check": {
+                "total": len(analysis.hidden_fillers),
+                "per_minute": per_minute(len(analysis.hidden_fillers), duration),
+                "note": (
+                    "Filler/hesitation sounds a second ASR pass (Parakeet) heard that "
+                    "Whisper's transcript shows no trace of at all - not in the text, and "
+                    "not as an acoustic hesitation above either. Not included in "
+                    "combined_total/combined_per_minute; use your judgement on whether "
+                    "these push the fluency score down further."
+                ),
+                "items": [
+                    {"term": h.term, "start": h.start, "sentence": h.sentence_index}
+                    for h in analysis.hidden_fillers
+                ],
+            },
         },
         "target_word_hits": [
             {
@@ -199,6 +240,7 @@ def build_payload(
                 "found": t.found,
                 "count": t.count,
                 "occurrences": t.occurrences,
+                "confirmed_by": t.confirmed_by,
             }
             for t in analysis.target_hits
         ],
@@ -209,6 +251,8 @@ def build_payload(
             "aligned": result.aligned,
             "language": result.language,
             "vad": "silero",
+            "parakeet_pass": parakeet_pass,
+            "target_word_cross_check": cross_check_engine,
             "elapsed_sec": elapsed,
             "generated_at": _now(),
             "thresholds": {
