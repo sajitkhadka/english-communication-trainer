@@ -71,10 +71,23 @@ measurement attached to the sentence it occurred in (`S3.` … `! fillers: … |
 answer costs hundreds of tokens instead of thousands. If you add a measurement to the
 pipeline, add it to the brief or the model will never see it.
 
+`brief_for_session` is mode-aware: that annotated form is for coached modes only. For
+`worklog`/`brainstorm` (`brief.CONTENT_ONLY_MODES`) it renders a much leaner form
+instead — a one-line header plus plain text, read from `data/transcripts/<id>.txt`
+(a sibling `pipeline/runner.py` writes next to the JSON) rather than the annotated
+sentences, since neither mode is coached and the measurements are pure token cost with
+nothing for the skill to act on. `journal` never calls `brief_for_session` at all — see
+below.
+
 **3. `services.record_feedback` is the single write path for analysis.** One JSON payload
 applies the score, SM-2 updates for every target word, new vocabulary, suggestions, and
 the status flip. It validates dimension names and ranges and rejects an `overall` key.
 Writing `data/feedback/<id>.md` before the call is what links the file to the session.
+It refuses `worklog` and `brainstorm` sessions outright — scoring a journal or an idea
+dump rewards performing over reporting (PRD-worklog 5.1), so each has its own write path
+(`record_worklog_entry` / `record_brainstorm_entry`) that skips `insert_score` entirely
+rather than inserting a meaningless row. `journal` never reaches any write path — see
+below.
 
 ### Two independent audio layers
 
@@ -97,13 +110,24 @@ Keep it that way when adding metrics.
 (`none`/`running`/`done`/`error`) because transcription runs independently of the Claude
 handoff. Do not collapse them.
 
-The frontend never calls Claude. Pressing Process transcribes and *then* sets `pending`
-— only a session with a transcript is queueable, so the queue never advertises work
-Claude cannot do; the user runs `/process-session` themselves (`docs/adr/0003-…`).
-`services.transcribe_session` holds a process-wide lock: two concurrent WhisperX loads
-do not fit in 6 GB and take the whole worker down natively, which leaves
-`transcribe_status` stuck at `running` with no exception to record. Any UI text about processing
-must stay honest about that — `ProcessResponse.hint` carries the wording.
+The frontend never calls Claude. Transcribing and queueing are two separate, explicit
+user actions — "Transcribe" (`POST /transcribe`, leaves `status` at `recorded`) and
+"Ready for AI processing" (`POST /process?transcribe=false`, the only thing that sets
+`pending`) — so nothing reaches the queue by accident. `services.enqueue` still accepts
+one combined call (`transcribe` left unset) for "Process again"/"Re-queue", but only a
+session with a transcript is ever queueable, so the queue never advertises work Claude
+cannot do; the user runs `/process-session` (or `/log-work`, `/process-brainstorm`)
+themselves (`docs/adr/0003-…`). `services.transcribe_session` holds a process-wide lock:
+two concurrent WhisperX loads do not fit in 6 GB and take the whole worker down
+natively, which leaves `transcribe_status` stuck at `running` with no exception to
+record. Any UI text about processing must stay honest about that — `ProcessResponse.hint`
+carries the wording.
+
+`journal` sessions take a third path that isn't either of the above: `_transcribe_session`
+finalises them directly to `processed` the moment transcription finishes (the plain-text
+transcript *is* the entry - see `data/transcripts/<id>.txt` in seam #2 above), and
+`enqueue` refuses them outright as a backend invariant, not a UI omission — this mode
+must never reach Claude, by design.
 
 ## Conventions worth knowing before editing
 

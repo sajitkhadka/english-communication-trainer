@@ -2,18 +2,27 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from pathlib import Path
 
 from .config import settings
 
-MODES = ("recommended", "freeform", "interview", "worklog")
+MODES = ("recommended", "freeform", "interview", "worklog", "brainstorm", "journal")
+
+
+def slugify(text: str, *, max_len: int = 40) -> str:
+    """Ascii kebab-case, capped - the human-readable half of a titled filename."""
+    text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()
+    return text[:max_len].strip("-") or "untitled"
 
 
 def ensure_tree() -> None:
     """Create every directory the app writes to. Safe to call repeatedly."""
     for mode in MODES:
         (settings.data_dir / "recordings" / mode).mkdir(parents=True, exist_ok=True)
-    for sub in ("transcripts", "feedback", "prompts", "queue"):
+    for sub in ("transcripts", "feedback", "prompts", "queue", "brainstorm"):
         (settings.data_dir / sub).mkdir(parents=True, exist_ok=True)
     for sub in ("daily", "monthly", "prep"):
         (settings.data_dir / "worklog" / sub).mkdir(parents=True, exist_ok=True)
@@ -57,8 +66,22 @@ def transcript_path(session_id: int) -> Path:
     return settings.data_dir / "transcripts" / f"{session_id}.json"
 
 
-def feedback_path(session_id: int) -> Path:
-    return settings.data_dir / "feedback" / f"{session_id}.md"
+def transcript_text_path(session_id: int) -> Path:
+    """Plain-text sibling of `transcript_path` - no word timings, no measurements.
+
+    What the lean, mode-aware brief reads for `worklog`/`brainstorm`, and what a
+    `journal` session's entry *is* (see app/brief.py, services.py)."""
+    return settings.data_dir / "transcripts" / f"{session_id}.txt"
+
+
+def feedback_path(session_id: int, slug: str | None = None) -> Path:
+    name = f"{session_id}-{slug}.md" if slug else f"{session_id}.md"
+    return settings.data_dir / "feedback" / name
+
+
+def brainstorm_path(session_id: int, slug: str | None = None) -> Path:
+    name = f"{session_id}-{slug}.md" if slug else f"{session_id}.md"
+    return settings.data_dir / "brainstorm" / name
 
 
 def prompt_path(session_id: int) -> Path:
@@ -69,8 +92,9 @@ def queue_marker(session_id: int) -> Path:
     return settings.data_dir / "queue" / f"{session_id}.pending"
 
 
-def worklog_daily_path(entry_date: str) -> Path:
-    return settings.data_dir / "worklog" / "daily" / f"{entry_date}.md"
+def worklog_daily_path(entry_date: str, slug: str | None = None) -> Path:
+    name = f"{entry_date}-{slug}.md" if slug else f"{entry_date}.md"
+    return settings.data_dir / "worklog" / "daily" / name
 
 
 def worklog_rollup_path(month: str) -> Path:

@@ -1,5 +1,13 @@
-export type Mode = "recommended" | "freeform" | "interview" | "worklog";
+export type Mode =
+  | "recommended"
+  | "freeform"
+  | "interview"
+  | "worklog"
+  | "brainstorm"
+  | "journal";
 export type SessionStatus = "awaiting_recording" | "recorded" | "pending" | "processed";
+/** Modes `change_session_mode` accepts as a switch target (backend: SWITCHABLE_MODES). */
+export type SwitchableMode = "freeform" | "worklog" | "brainstorm" | "journal";
 
 export interface Score {
   id: number;
@@ -31,6 +39,8 @@ export interface Session {
   transcribe_error: string | null;
   duration_sec: number | null;
   notes: string | null;
+  title: string | null;
+  summary: string | null;
   score: Score | null;
   has_audio: boolean;
   has_transcript: boolean;
@@ -172,7 +182,9 @@ export interface Transcript {
     };
     combined_total: number;
     combined_per_minute: number | null;
-    cross_check: {
+    // Absent on transcripts written before the Parakeet cross-check pass was added -
+    // never assume it's there.
+    cross_check?: {
       total: number;
       per_minute: number | null;
       note: string;

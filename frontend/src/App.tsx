@@ -31,6 +31,8 @@ export default function App() {
           <NavLink to="/freeform">Free-form</NavLink>
           <NavLink to="/interview">Interview</NavLink>
           <NavLink to="/worklog">Worklog</NavLink>
+          <NavLink to="/brainstorm">Brainstorm</NavLink>
+          <NavLink to="/journal">Journal</NavLink>
           <NavLink to="/vocabulary">Vocabulary</NavLink>
           <NavLink to="/suggestions">Suggestions</NavLink>
           <NavLink to="/progress">Progress</NavLink>
@@ -60,6 +62,14 @@ export default function App() {
           <Route
             path="/worklog"
             element={<Sessions mode="worklog" onQueueChange={queue.reload} />}
+          />
+          <Route
+            path="/brainstorm"
+            element={<Sessions mode="brainstorm" onQueueChange={queue.reload} />}
+          />
+          <Route
+            path="/journal"
+            element={<Sessions mode="journal" onQueueChange={queue.reload} />}
           />
           <Route path="/session/:id" element={<SessionDetail onQueueChange={queue.reload} />} />
           <Route path="/vocabulary" element={<Vocabulary />} />

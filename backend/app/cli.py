@@ -255,6 +255,15 @@ def cmd_session_enqueue(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_session_set_mode(args: argparse.Namespace) -> int:
+    try:
+        emit(services.change_session_mode(args.session_id, args.mode))
+    except services.WorkflowError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 # --------------------------------------------------------------------------- #
 # feedback write-back
 # --------------------------------------------------------------------------- #
@@ -314,6 +323,7 @@ def cmd_worklog_add(args: argparse.Namespace) -> int:
                 entry_date=args.date,
                 markdown=md_path.read_text(encoding="utf-8"),
                 summary=args.summary,
+                title=args.title,
                 projects=_csv(args.projects),
                 tags=_csv(args.tags),
                 session_id=args.session,
@@ -342,11 +352,18 @@ def cmd_worklog_list(args: argparse.Namespace) -> int:
 
 def cmd_worklog_show(args: argparse.Namespace) -> int:
     """Print a daily entry (YYYY-MM-DD) or a monthly rollup (YYYY-MM)."""
-    from .paths import worklog_daily_path, worklog_rollup_path
+    from .paths import abspath, worklog_rollup_path
 
     ref = args.date_or_month
-    path = worklog_daily_path(ref) if len(ref) > 7 else worklog_rollup_path(ref)
-    if not path.is_file():
+    if len(ref) > 7:
+        # The filename carries a title slug, so it is no longer guessable from the
+        # date alone - the DB row is the source of truth for where it lives.
+        with dbmod.cursor() as conn:
+            entry = dbmod.get_worklog_entry(conn, ref)
+        path = abspath(entry["path"]) if entry else None
+    else:
+        path = worklog_rollup_path(ref)
+    if path is None or not path.is_file():
         kind = "entry" if len(ref) > 7 else "rollup"
         print(f"error: no worklog {kind} for {ref}", file=sys.stderr)
         return 2
@@ -373,6 +390,31 @@ def cmd_worklog_rollup_add(args: argparse.Namespace) -> int:
 
 def cmd_worklog_rollup_status(args: argparse.Namespace) -> int:
     emit(services.worklog_rollup_status())
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# brainstorm
+# --------------------------------------------------------------------------- #
+
+
+def cmd_brainstorm_add(args: argparse.Namespace) -> int:
+    md_path = Path(args.markdown)
+    if not md_path.is_file():
+        print(f"error: markdown file not found: {md_path}", file=sys.stderr)
+        return 2
+    try:
+        emit(
+            services.record_brainstorm_entry(
+                session_id=args.session,
+                markdown=md_path.read_text(encoding="utf-8"),
+                title=args.title,
+                summary=args.summary,
+            )
+        )
+    except services.WorkflowError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     return 0
 
 
@@ -463,7 +505,9 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
 
     p = sess_sub.add_parser("create", help="create a session + prompt file")
     p.add_argument(
-        "--mode", required=True, choices=["recommended", "freeform", "interview", "worklog"]
+        "--mode",
+        required=True,
+        choices=["recommended", "freeform", "interview", "worklog", "brainstorm", "journal"],
     )
     p.add_argument("--topic", help="topic, or the interview question")
     p.add_argument("--category")
@@ -472,7 +516,10 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     p.set_defaults(func=cmd_session_create)
 
     p = sess_sub.add_parser("list", help="list sessions")
-    p.add_argument("--mode", choices=["recommended", "freeform", "interview", "worklog"])
+    p.add_argument(
+        "--mode",
+        choices=["recommended", "freeform", "interview", "worklog", "brainstorm", "journal"],
+    )
     p.add_argument("--status", choices=["awaiting_recording", "recorded", "pending", "processed"])
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(func=cmd_session_list)
@@ -506,6 +553,13 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     p.add_argument("session_id", type=int)
     p.set_defaults(func=cmd_session_enqueue)
 
+    p = sess_sub.add_parser(
+        "set-mode", help="change a session's mode before deciding how to process it"
+    )
+    p.add_argument("session_id", type=int)
+    p.add_argument("mode", choices=list(services.SWITCHABLE_MODES))
+    p.set_defaults(func=cmd_session_set_mode)
+
     # feedback
     fb_p = sub.add_parser("feedback", help="write analysis back to the DB")
     fb_sub = fb_p.add_subparsers(dest="action", required=True)
@@ -525,6 +579,9 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     p.add_argument("--markdown", required=True, help="path to the entry markdown")
     p.add_argument("--date", required=True, help="ISO date the entry is for (YYYY-MM-DD)")
     p.add_argument("--summary", required=True, help="one line, shown in listings")
+    p.add_argument(
+        "--title", help="short, filename-safe title - shown in the UI, used in the filename"
+    )
     p.add_argument("--projects", help="comma-separated project slugs")
     p.add_argument("--tags", help=f"comma-separated, from: {', '.join(services.WORKLOG_TAGS)}")
     p.add_argument("--session", type=int, help="worklog session to link and mark processed")
@@ -552,6 +609,18 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     rollup_sub.add_parser("status", help="completed months lacking a rollup").set_defaults(
         func=cmd_worklog_rollup_status
     )
+
+    # brainstorm
+    bs_p = sub.add_parser("brainstorm", help="idea-dump sessions: no coaching, no score")
+    bs_sub = bs_p.add_subparsers(dest="action", required=True)
+    p = bs_sub.add_parser("add", help="file one session's ideas: markdown + status flip")
+    p.add_argument("--session", type=int, required=True, help="brainstorm session to link")
+    p.add_argument("--markdown", required=True, help="path to the ideas markdown")
+    p.add_argument(
+        "--title", help="short, filename-safe title - shown in the UI, used in the filename"
+    )
+    p.add_argument("--summary", help="one line, shown in the UI")
+    p.set_defaults(func=cmd_brainstorm_add)
 
     # suggestions
     req_p = sub.add_parser("requests", help="frontend requests for topic suggestions")

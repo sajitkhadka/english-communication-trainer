@@ -13,12 +13,19 @@ import {
 import { useAsync, useDocumentTitle } from "../hooks";
 import type { Mode } from "../types";
 
+// Modes that are never coached/scored - a recording, not a practice repetition.
+const UNSCORED_MODES: Mode[] = ["freeform", "worklog", "brainstorm", "journal"];
+
 const BLURB: Record<Mode, string> = {
   recommended: "Topics Claude generated with target vocabulary to work in.",
   freeform: "Your own topics. No target words, so target-word usage is not scored.",
   interview: "One-way interview practice: a question, one answer, the same analysis.",
   worklog:
     "Daily work journal: talk through your day, then /log-work turns it into a structured entry. Not scored.",
+  brainstorm:
+    "Think out loud about anything. /process-brainstorm organises it into ideas - no coaching, no score.",
+  journal:
+    "Daily life, off the record. Transcribed for your own reading only - never sent to Claude, never scored.",
 };
 
 export default function Sessions({
@@ -33,12 +40,26 @@ export default function Sessions({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
 
-  const queueForClaude = async (id: number, force = false) => {
+  const transcribeOnly = async (id: number) => {
     if (busy !== null) return;
     setBusy(id);
     setError(null);
     try {
-      const result = await api.process(id, force);
+      await api.transcribe(id);
+      sessions.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not transcribe the session.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const queueForClaude = async (id: number, force = false, transcribe?: boolean) => {
+    if (busy !== null) return;
+    setBusy(id);
+    setError(null);
+    try {
+      const result = await api.process(id, force, transcribe);
       if (result.transcription_error) {
         setError(`Transcription failed: ${result.transcription_error}`);
       } else if (!result.queued) {
@@ -72,7 +93,7 @@ export default function Sessions({
         ) : rows.length === 0 ? (
           <Empty title={`No ${MODE_LABEL[mode].toLowerCase()} sessions yet`}>
             <p>
-              {mode === "freeform" || mode === "worklog" ? (
+              {UNSCORED_MODES.includes(mode) ? (
                 <>
                   Start one from the <Link to="/">Practice</Link> page.
                 </>
@@ -102,13 +123,19 @@ export default function Sessions({
                   <tr key={session.id}>
                     <td>
                       <Link to={`/session/${session.id}`} className="session-row-topic">
-                        {session.topic ?? `Session ${session.id}`}
+                        {session.title ?? session.topic ?? `Session ${session.id}`}
                       </Link>
                       <div className="session-row-meta">
-                        {session.category && <>{session.category} · </>}
-                        {session.target_words.length > 0
-                          ? `${session.target_words.length} target words`
-                          : "no target words"}
+                        {session.summary ? (
+                          session.summary
+                        ) : (
+                          <>
+                            {session.category && <>{session.category} · </>}
+                            {session.target_words.length > 0
+                              ? `${session.target_words.length} target words`
+                              : "no target words"}
+                          </>
+                        )}
                       </div>
                     </td>
                     <td className="small">{formatDate(session.created_at)}</td>
@@ -124,19 +151,30 @@ export default function Sessions({
                       <StatusPill status={session.status} />
                     </td>
                     <td>
-                      {(session.status === "recorded" || session.status === "pending") && (
+                      {session.status === "recorded" && !session.has_transcript && (
                         <button
-                          className={session.status === "recorded" ? "primary" : undefined}
-                          onClick={() =>
-                            queueForClaude(session.id, session.status === "pending")
-                          }
+                          className="primary"
+                          onClick={() => transcribeOnly(session.id)}
                           disabled={busy !== null}
                         >
-                          {busy === session.id
-                            ? "Transcribing…"
-                            : session.status === "recorded"
-                              ? "Process"
-                              : "Process again"}
+                          {busy === session.id ? "Transcribing…" : "Transcribe"}
+                        </button>
+                      )}
+                      {session.status === "recorded" && session.has_transcript && (
+                        <button
+                          className="primary"
+                          onClick={() => queueForClaude(session.id, false, false)}
+                          disabled={busy !== null}
+                        >
+                          {busy === session.id ? "Queuing…" : "Ready for AI processing"}
+                        </button>
+                      )}
+                      {session.status === "pending" && (
+                        <button
+                          onClick={() => queueForClaude(session.id, true)}
+                          disabled={busy !== null}
+                        >
+                          {busy === session.id ? "Transcribing…" : "Process again"}
                         </button>
                       )}
                       {session.status === "awaiting_recording" && (

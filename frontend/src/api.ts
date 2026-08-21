@@ -7,6 +7,7 @@ import type {
   Session,
   SessionDetail,
   Suggestion,
+  SwitchableMode,
   Transcript,
   Word,
   WordStats,
@@ -83,12 +84,24 @@ export const api = {
   brief: (id: number) => request<string>(`/sessions/${id}/brief`),
   audioUrl: (id: number) => `${BASE}/sessions/${id}/audio`,
 
-  process: (id: number, force = false) =>
-    request<ProcessResponse>(`/sessions/${id}/process${force ? "?force=true" : ""}`, {
-      method: "POST",
-    }),
+  // `transcribe: false` is the "ready for AI processing" step: the session already
+  // has a transcript, and this only flips it to `pending` without re-running the GPU
+  // pipeline. Omit it (default) to transcribe-and-queue in one call, e.g. "Process again".
+  process: (id: number, force = false, transcribe?: boolean) => {
+    const query = new URLSearchParams();
+    if (force) query.set("force", "true");
+    if (transcribe !== undefined) query.set("transcribe", String(transcribe));
+    const suffix = query.toString() ? `?${query}` : "";
+    return request<ProcessResponse>(`/sessions/${id}/process${suffix}`, { method: "POST" });
+  },
   transcribe: (id: number) =>
     request<Record<string, unknown>>(`/sessions/${id}/transcribe`, { method: "POST" }),
+  setMode: (id: number, mode: SwitchableMode) =>
+    request<Session>(`/sessions/${id}/mode`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode }),
+    }),
 
   queue: () => request<QueuePayload>("/queue"),
 

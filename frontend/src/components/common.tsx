@@ -10,7 +10,26 @@ export const MODE_LABEL: Record<Mode, string> = {
   freeform: "Free-form",
   interview: "Interview",
   worklog: "Worklog",
+  brainstorm: "Brainstorm",
+  journal: "Daily journal",
 };
+
+/** Slash command that turns a queued session into feedback/entry/ideas, or null when
+ * the mode is never AI-processed at all (journal). */
+export function processCommand(mode: Mode): string | null {
+  if (mode === "worklog") return "/log-work";
+  if (mode === "brainstorm") return "/process-brainstorm";
+  if (mode === "journal") return null;
+  return "/process-session";
+}
+
+/** What to call the markdown/text card a processed session renders. */
+export function feedbackCardTitle(mode: Mode): string {
+  if (mode === "worklog") return "Journal entry";
+  if (mode === "brainstorm") return "Ideas";
+  if (mode === "journal") return "Journal";
+  return "Feedback";
+}
 
 const STATUS_LABEL: Record<SessionStatus, string> = {
   awaiting_recording: "Awaiting recording",

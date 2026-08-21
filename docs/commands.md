@@ -16,18 +16,35 @@ All `ect` commands run from `backend/`. `uv run ect …` and
 ```
 /generate-topic            ->  session created, status awaiting_recording
     record in the frontend ->  status recorded
-    press Process          ->  transcribes, then status pending if the transcript
-                               landed  (PRD 6.3: the frontend flags, you pull)
+    press Transcribe       ->  transcribes, status stays recorded
+    press "Ready for AI    ->  status pending  (PRD 6.3: the frontend flags, you pull -
+     processing"                nothing reaches the queue without this explicit step)
 /process-session           ->  feedback + score written, status processed
 ```
 
-`pending` is only ever set once `data/transcripts/<id>.json` exists, so every session in
-the queue has something for Claude to read. A session whose transcription failed stays
-`recorded` and reports `queued: false`; the failure is in `transcribe_error`.
+Transcribing and queueing are two separate, deliberate actions — the frontend's old
+single "Process" button is now "Transcribe" followed by "Ready for AI processing" (they
+can still be one click via `POST /process` with no `transcribe` param, which is what
+"Process again" / "Re-queue" use). `pending` is only ever set once
+`data/transcripts/<id>.json` exists, so every session in the queue has something for
+Claude to read. A session whose transcription failed stays `recorded` and reports
+`queued: false`; the failure is in `transcribe_error`.
 
-The worklog variant (PRD-worklog) shares the pipeline but ends differently: record under
-**Worklog** in the frontend, press Process, then run `/log-work` — the result is a
-journal entry in `data/worklog/daily/`, not feedback or a score.
+Three variants share the pipeline but end differently:
+
+- **`worklog`** — record under **Worklog**, transcribe, queue, then run `/log-work` — the
+  result is a journal entry in `data/worklog/daily/`, not feedback or a score.
+- **`brainstorm`** — record under **Brainstorm**, transcribe, queue, then run
+  `/process-brainstorm` — the result is an ideas note in `data/brainstorm/`, not feedback
+  or a score.
+- **`journal`** — record under **Daily journal**, transcribe. That's it: the plain-text
+  transcript *is* the entry, the session finalises itself the moment transcription
+  finishes, and it is never queued for Claude at all - `enqueue`/`POST /process` refuses
+  it outright. Nothing about this mode ever leaves the machine.
+
+`worklog`, `brainstorm`, and `journal` (plus `freeform`) can be switched into or out of
+after recording, before the session is `processed` — `PATCH /api/sessions/{id}/mode` /
+`ect session set-mode <id> <mode>` — in case the wrong one got picked at record time.
 
 ---
 
@@ -67,11 +84,20 @@ target-word usage check, a **model answer**, the rubric score, and one next focu
 
 Turns pending `worklog` sessions (the daily spoken work journal) into structured
 entries: projects, decisions with the why, hurdles, wins, competency tags from a
-controlled list. Files the entry via `ect worklog add`, which stores the markdown at
-`data/worklog/daily/<date>.md`, indexes it for retrieval, and marks the session
-processed. A second recording on the same date is merged, never overwritten blindly.
-No score — worklog sessions are journal captures, not practice, and
-`/process-session` skips them.
+controlled list, plus a short title and one-line summary. Files the entry via
+`ect worklog add`, which stores the markdown at `data/worklog/daily/<date>-<slug>.md`
+(the title, slugified), indexes it for retrieval, and marks the session processed. A
+second recording on the same date is merged, never overwritten blindly. No score —
+worklog sessions are journal captures, not practice, and `/process-session` skips them.
+
+### `/process-brainstorm [<session_id>]`
+
+Turns pending `brainstorm` sessions (idea-dumps, no target words) into an organised
+note: ideas, open threads, and next steps, plus a short title and one-line summary.
+Files it via `ect brainstorm add`, which stores the markdown at
+`data/brainstorm/<id>-<slug>.md` and marks the session processed. No score, no target
+words, no vocabulary updates — same reasoning as worklog: this is extraction, not
+practice, and `/process-session` skips it too.
 
 ### `/vocab-review [limit]`
 
@@ -112,8 +138,10 @@ uv run ect session show 12
 uv run ect session brief 12 [--max-sentences 40]
 uv run ect session transcribe 12 [--force]
 uv run ect session attach 12 --audio ~/voice-memo.m4a   # recorded outside the browser
-uv run ect session enqueue 12                          # what the UI Process button does
+uv run ect session enqueue 12                          # what the UI "Ready for AI" button does
 uv run ect session pending
+uv run ect session set-mode 12 worklog                 # freeform|worklog|brainstorm|journal only,
+                                                         # and only before the session is processed
 ```
 
 ### Feedback write-back
@@ -137,6 +165,8 @@ Payload:
 ```json
 {
   "session_id": 12,
+  "title": "Incident retro walkthrough",
+  "summary": "Walked through the payment-migration incident retro",
   "scores": {"vocab_range": 6.5, "filler_density": 4.0, "fluency": 6.0,
              "grammar": 7.5, "structure": 6.0, "coherence": 7.0, "target_usage": 5.0},
   "target_words": [
@@ -150,6 +180,11 @@ Payload:
 }
 ```
 
+- `title`/`summary`: optional but expected. `title` becomes part of the feedback
+  filename (`data/feedback/<id>-<slug>.md`, slugified) and what the frontend's session
+  list shows in place of the raw topic; `summary` is the one-line secondary text next to
+  it. Omit either and the old behaviour applies (`data/feedback/<id>.md`, raw topic
+  shown).
 - `scores`: 0-10 each. **No `overall`** — it is computed. `target_usage` is dropped
   automatically for `freeform`.
 - `target_words`: list **every** target word of the session. An omitted word is never
@@ -165,6 +200,7 @@ Payload:
 ```bash
 uv run ect worklog add --markdown entry.md --date 2026-08-14 \
     --summary "Shipped batched writes; cut p99 40%" \
+    --title "Payment migration batched writes" \
     --projects "payment-migration,oncall" --tags "debugging,cross-team" --session 12
 
 uv run ect worklog list --month 2026-08 --tag conflict --project payment-migration
@@ -175,13 +211,39 @@ uv run ect worklog rollup add --month 2026-08 --markdown rollup.md
 ```
 
 `worklog add` is the journal's single write path: it validates the tags against the
-controlled list (PRD-worklog 6.1), files the markdown at `data/worklog/daily/<date>.md`
-(one file per date — it overwrites, so merging same-day additions happens in the skill
-before calling), upserts the index row, and if `--session` is given links the session
-and flips it to `processed`. `ect feedback apply` refuses worklog sessions by design.
+controlled list (PRD-worklog 6.1), files the markdown at
+`data/worklog/daily/<date>-<slug>.md` (the `--title`, slugified; one file per date — a
+changed title on a same-day re-add removes the stale file rather than leaving an orphan),
+upserts the index row, and if `--session` is given links the session, mirrors
+`title`/`summary` onto it, and flips it to `processed`. `ect feedback apply` refuses
+worklog sessions by design.
+
+Because the filename carries a title, `ect worklog show <date>` no longer guesses the
+path from the date — it looks up the index row and reads whatever `path` it points to.
 
 Entries outlive sessions: deleting a worklog session from the frontend removes the
 recording and transcript but never the journal entry.
+
+### Brainstorm
+
+```bash
+uv run ect brainstorm add --session 12 --markdown ideas.md \
+    --title "CLI tool for log triage" --summary "Sketched a CLI to triage prod logs by service"
+```
+
+The idea-dump write path — no date-merge, no tags, no rollups (each brainstorm session
+is a standalone capture, not a slice of a continuous journal). Stores the markdown at
+`data/brainstorm/<id>-<slug>.md`, mirrors `title`/`summary` onto the session, and flips
+it to `processed`. `ect feedback apply` refuses brainstorm sessions too, for the same
+reason it refuses worklog: there is no score to insert.
+
+### Journal
+
+No CLI write path — nothing to write. `ect session transcribe <id>` on a `journal`
+session finalises it directly: the plain-text transcript sibling
+(`data/transcripts/<id>.txt`) becomes the entry, `feedback_path` is pointed at it, and
+`status` goes straight to `processed`. `ect session enqueue`/`POST /process` refuse
+journal sessions outright — this mode is never queued for Claude, by design.
 
 ### Suggestions
 
@@ -210,6 +272,15 @@ an acoustic hesitation — a sound Silero heard that Whisper deleted (PRD 5.2). 
 are citable as `S3`, and a five-minute answer costs a few hundred tokens instead of
 several thousand.
 
+`ect session brief` is mode-aware: the annotated form above is for coached modes only
+(`recommended`/`freeform`/`interview`). `worklog` and `brainstorm` get a much leaner
+brief instead — a one-line header plus the plain transcript text, no measurements, no
+target-word section — since neither is coached and the annotations would be pure token
+cost with nothing for the skill to act on. That plain text comes from
+`data/transcripts/<id>.txt`, a sibling the pipeline writes next to the JSON specifically
+so a content-only skill never has to touch the word-timing array to get it. `journal`
+never calls `brief` at all — see the Journal section above.
+
 ---
 
 ## Running the server
@@ -220,4 +291,6 @@ cd frontend && npm run dev                                       # http://localh
 ```
 
 Useful endpoints: `GET /api/health`, `GET /api/doctor`, `GET /api/queue`,
-`POST /api/sessions/{id}/process`, `GET /api/sessions/{id}/brief`.
+`POST /api/sessions/{id}/transcribe` (transcribe only), `POST /api/sessions/{id}/process`
+(`?transcribe=false` to queue an already-transcribed session without re-running the GPU
+pipeline), `PATCH /api/sessions/{id}/mode`, `GET /api/sessions/{id}/brief`.

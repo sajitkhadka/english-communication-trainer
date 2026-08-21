@@ -30,7 +30,7 @@ CREATE INDEX IF NOT EXISTS idx_words_mastery ON words(mastery);
 
 CREATE TABLE IF NOT EXISTS sessions (
   id              INTEGER PRIMARY KEY,
-  mode            TEXT NOT NULL,            -- recommended | freeform | interview | worklog
+  mode            TEXT NOT NULL,            -- recommended | freeform | interview | worklog | brainstorm | journal
   category        TEXT,
   topic           TEXT,
   target_words    TEXT,                     -- JSON array of terms
@@ -45,7 +45,12 @@ CREATE TABLE IF NOT EXISTS sessions (
   transcribe_status TEXT DEFAULT 'none',    -- none | running | done | error
   transcribe_error  TEXT,
   duration_sec      REAL,
-  notes             TEXT                    -- ADDITIVE: user's own note / typed prompt context
+  notes             TEXT,                   -- ADDITIVE: user's own note / typed prompt context
+  -- ADDITIVE: a short Claude-authored title + one-line summary, written back once a
+  -- session is processed (or, for `journal`, never - there is no processing). Doubles
+  -- as the UI's compact label and the human-readable part of the output filename.
+  title             TEXT,
+  summary           TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);

@@ -77,7 +77,7 @@ export default function Playback({ sessionId, transcript }: { sessionId: number;
       const label = item.heard_as ? `hesitation ${item.dur}s (heard as "${item.heard_as}")` : `hesitation ${item.dur}s`;
       push(item.sentence ?? sentenceAt(sentences, item.start), label);
     }
-    for (const item of transcript.fillers.cross_check.items) {
+    for (const item of transcript.fillers.cross_check?.items ?? []) {
       push(item.sentence ?? sentenceAt(sentences, item.start), `cross-check "${item.term}"`);
     }
     return map;

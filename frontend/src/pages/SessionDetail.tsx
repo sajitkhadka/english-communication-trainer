@@ -12,11 +12,15 @@ import {
   Markdown,
   StatusPill,
   Tile,
+  feedbackCardTitle,
   formatDate,
   formatDuration,
+  processCommand,
 } from "../components/common";
 import { useAsync, useDocumentTitle, useRefreshOnFocus } from "../hooks";
-import type { Score } from "../types";
+import type { Score, SwitchableMode } from "../types";
+
+const SWITCHABLE_MODES: SwitchableMode[] = ["freeform", "worklog", "brainstorm", "journal"];
 
 export default function SessionDetail({ onQueueChange }: { onQueueChange: () => void }) {
   const { id } = useParams();
@@ -31,6 +35,7 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [switchingMode, setSwitchingMode] = useState(false);
 
   useDocumentTitle(session.data?.topic ?? `Session ${sessionId}`);
 
@@ -44,11 +49,25 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
 
   const data = session.data;
 
-  const queueForClaude = async (force = false) => {
+  const transcribeOnly = async () => {
     setBusy(true);
     setError(null);
     try {
-      const result = await api.process(sessionId, force);
+      await api.transcribe(sessionId);
+      session.reload();
+      transcript.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not transcribe the session.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const queueForClaude = async (force = false, transcribeFlag?: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.process(sessionId, force, transcribeFlag);
       if (result.transcription_error) {
         setError(`Transcription failed: ${result.transcription_error}`);
       } else if (!result.queued) {
@@ -61,6 +80,19 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
       setError(err instanceof Error ? err.message : "Could not queue the session.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const changeMode = async (mode: SwitchableMode) => {
+    setSwitchingMode(true);
+    setError(null);
+    try {
+      await api.setMode(sessionId, mode);
+      session.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not change the session's mode.");
+    } finally {
+      setSwitchingMode(false);
     }
   };
 
@@ -91,29 +123,57 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
             <Link to={`/${data.mode}`}>{MODE_LABEL[data.mode]}</Link> · session {data.id} ·{" "}
             {formatDate(data.created_at)}
           </p>
-          <h1>{data.topic ?? `Session ${data.id}`}</h1>
+          <h1>{data.title ?? data.topic ?? `Session ${data.id}`}</h1>
+          {data.summary && (
+            <p className="small muted" style={{ marginTop: "-0.4rem" }}>
+              {data.summary}
+            </p>
+          )}
           <p>
             {data.category && <>{data.category} · </>}
             {formatDuration(data.duration_sec)}
           </p>
+          {data.status !== "processed" && SWITCHABLE_MODES.includes(data.mode as SwitchableMode) && (
+            <p className="small muted">
+              Not sure this was the right kind of recording?{" "}
+              <select
+                value={data.mode}
+                disabled={switchingMode}
+                onChange={(event) => void changeMode(event.target.value as SwitchableMode)}
+              >
+                {SWITCHABLE_MODES.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {MODE_LABEL[mode]}
+                  </option>
+                ))}
+              </select>
+            </p>
+          )}
         </div>
         <div className="btn-row">
           <StatusPill status={data.status} />
-          {(data.status === "recorded" ||
-            data.status === "pending" ||
-            data.status === "processed") && (
+          {data.status === "recorded" && !data.has_transcript && (
+            <button className="primary" onClick={transcribeOnly} disabled={busy}>
+              {busy ? "Transcribing…" : "Transcribe"}
+            </button>
+          )}
+          {data.status === "recorded" && data.has_transcript && (
             <button
-              className={data.status === "recorded" ? "primary" : undefined}
-              onClick={() => queueForClaude(data.status !== "recorded")}
+              className="primary"
+              onClick={() => queueForClaude(false, false)}
               disabled={busy}
             >
-              {busy
-                ? "Transcribing…"
-                : data.status === "recorded"
-                  ? "Process"
-                  : data.status === "pending"
-                    ? "Process again"
-                    : "Re-queue"}
+              {busy ? "Queuing…" : "Ready for AI processing"}
+            </button>
+          )}
+          {data.status === "pending" && (
+            <button onClick={() => queueForClaude(true)} disabled={busy}>
+              {busy ? "Transcribing…" : "Process again"}
+            </button>
+          )}
+          {data.status === "processed" && data.mode !== "journal" && (
+            <button onClick={() => queueForClaude(true)} disabled={busy}>
+              {busy ? "Transcribing…" : "Re-queue"}
             </button>
           )}
           <button className="danger" onClick={remove}>
@@ -126,12 +186,13 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
 
       {data.status === "pending" && (
         <p className="notice">
-          Queued for Claude. Run{" "}
-          <code>{data.mode === "worklog" ? "/log-work" : "/process-session"}</code> in the
-          Claude Code console to
+          Queued for Claude. Run <code>{processCommand(data.mode) ?? "/process-session"}</code>{" "}
+          in the Claude Code console to
           {data.mode === "worklog"
             ? " turn this recording into a journal entry."
-            : " generate feedback for every queued session."}
+            : data.mode === "brainstorm"
+              ? " organise this into ideas."
+              : " generate feedback for every queued session."}
         </p>
       )}
       {data.transcribe_status === "error" && (
@@ -238,7 +299,7 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
           </div>
           <audio src={api.audioUrl(sessionId)} controls style={{ width: "100%" }} />
           <p className="muted small" style={{ marginBottom: 0 }}>
-            Not transcribed yet — press Process to run the analysis.
+            Not transcribed yet — press Transcribe above to run the analysis.
           </p>
         </div>
       ) : (
@@ -272,7 +333,7 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
       {data.feedback_markdown ? (
         <div className="card">
           <div className="card-head">
-            <h2>{data.mode === "worklog" ? "Journal entry" : "Feedback"}</h2>
+            <h2>{feedbackCardTitle(data.mode)}</h2>
             <span className="muted small">{data.feedback_path}</span>
           </div>
           <Markdown>{data.feedback_markdown}</Markdown>
@@ -280,19 +341,23 @@ export default function SessionDetail({ onQueueChange }: { onQueueChange: () => 
       ) : (
         data.status !== "awaiting_recording" && (
           <div className="card">
-            <Empty title={data.mode === "worklog" ? "No journal entry yet" : "No feedback yet"}>
+            <Empty title={`No ${feedbackCardTitle(data.mode).toLowerCase()} yet`}>
               <p>
-                {data.status === "pending" ? (
+                {data.mode === "journal" ? (
                   <>
-                    This session is queued. Run{" "}
-                    <code>{data.mode === "worklog" ? "/log-work" : "/process-session"}</code> in
-                    the console.
+                    Press <strong>Transcribe</strong> above — the transcript becomes this
+                    entry automatically, no console command needed.
+                  </>
+                ) : data.status === "pending" ? (
+                  <>
+                    This session is queued. Run <code>{processCommand(data.mode)}</code> in the
+                    console.
                   </>
                 ) : (
                   <>
-                    Press <strong>Process</strong> above, then run{" "}
-                    <code>{data.mode === "worklog" ? "/log-work" : "/process-session"}</code> in
-                    the console.
+                    Press <strong>Transcribe</strong> above, then{" "}
+                    <strong>Ready for AI processing</strong>, then run{" "}
+                    <code>{processCommand(data.mode)}</code> in the console.
                   </>
                 )}
               </p>

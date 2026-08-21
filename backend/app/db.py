@@ -77,7 +77,18 @@ def init_db(db_path: Path | str | None = None) -> Path:
     path = Path(db_path) if db_path else settings.db_path
     with cursor(path) as conn:
         conn.executescript(SCHEMA_FILE.read_text(encoding="utf-8"))
+        _migrate(conn)
     return path
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """`CREATE TABLE IF NOT EXISTS` only helps a fresh DB - a column added to
+    schema.sql after a DB already exists needs its own `ALTER TABLE` here (see
+    CLAUDE.md). Guarded so a DB that already has the column is a no-op."""
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
+    for column in ("title", "summary"):
+        if column not in existing:
+            conn.execute(f"ALTER TABLE sessions ADD COLUMN {column} TEXT")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -170,6 +181,8 @@ def update_session(conn: sqlite3.Connection, session_id: int, **fields: Any) -> 
         "transcribe_error",
         "duration_sec",
         "notes",
+        "title",
+        "summary",
     }
     unknown = set(fields) - allowed
     if unknown:

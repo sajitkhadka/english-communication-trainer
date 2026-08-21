@@ -41,8 +41,9 @@ the error and move on to the next session.
 uv run ect session brief 12
 ```
 
-Ignore the filler/pause annotations — they are for practice sessions. You are reading
-for content: what happened, what was decided and why, what went wrong, what shipped.
+This is the lean, content-only brief (no filler counts, no pause map, no target-word
+section) - just the topic and the plain transcript text. Read it for content: what
+happened, what was decided and why, what went wrong, what shipped.
 
 ## 4. Determine the entry date, and merge if it already exists
 
@@ -104,14 +105,18 @@ Rules:
 ```bash
 uv run ect worklog add --markdown /path/to/entry.md --date 2026-08-14 \
     --summary "Shipped batched writes for payment-migration; cut p99 40%" \
+    --title "Payment migration batched writes" \
     --projects "payment-migration,oncall" --tags "debugging,cross-team" --session 12
 ```
 
-`--summary` is one line and is what listings and future retrieval show — make it carry
-the day's headline, not "worked on stuff". This call files the markdown at
-`data/worklog/daily/<date>.md`, indexes it, links the session and flips it to
-`processed`. Do not use `ect feedback apply` for worklog sessions — the backend refuses
-it by design.
+`--summary` is one line and is what listings, retrieval, and the frontend's session list
+show — make it carry the day's headline, not "worked on stuff". `--title` is a short,
+filename-safe label (a few words); it becomes part of the stored filename
+(`data/worklog/daily/<date>-<slug>.md`) and what the UI shows in place of the raw
+"Worklog - 2026-08-14" topic, so make it specific to what the day was actually about.
+Always include both, even on a thin day. This call indexes the entry, links the session,
+and flips it to `processed`. Do not use `ect feedback apply` for worklog sessions — the
+backend refuses it by design.
 
 ## 7. Update the profile
 

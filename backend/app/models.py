@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-Mode = Literal["recommended", "freeform", "interview", "worklog"]
+Mode = Literal["recommended", "freeform", "interview", "worklog", "brainstorm", "journal"]
 Status = Literal["awaiting_recording", "recorded", "pending", "processed"]
 
 
@@ -42,6 +42,8 @@ class SessionOut(BaseModel):
     transcribe_error: str | None = None
     duration_sec: float | None = None
     notes: str | None = None
+    title: str | None = None
+    summary: str | None = None
     score: dict[str, Any] | None = None
     has_audio: bool = False
     has_transcript: bool = False
@@ -51,6 +53,10 @@ class SessionOut(BaseModel):
 class SessionDetail(SessionOut):
     feedback_markdown: str | None = None
     target_words_detail: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class SessionModeUpdate(BaseModel):
+    mode: Literal["freeform", "worklog", "brainstorm", "journal"]
 
 
 class WordOut(BaseModel):

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import threading
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from . import db as dbmod
 from . import srs
 from .paths import (
     abspath,
+    brainstorm_path,
     ensure_tree,
     feedback_path,
     find_recording,
@@ -25,7 +27,9 @@ from .paths import (
     queue_marker,
     recording_path,
     relpath,
+    slugify,
     transcript_path,
+    transcript_text_path,
     worklog_daily_path,
     worklog_rollup_path,
 )
@@ -51,13 +55,13 @@ def create_session(
     notes: str | None = None,
     write_prompt: bool = True,
 ) -> dict[str, Any]:
-    if mode not in ("recommended", "freeform", "interview", "worklog"):
+    if mode not in ("recommended", "freeform", "interview", "worklog", "brainstorm", "journal"):
         raise WorkflowError(f"unknown mode {mode!r}")
     if mode in ("recommended", "interview") and not topic:
         raise WorkflowError(f"{mode} sessions need a topic")
-    if mode == "worklog" and not topic:
+    if mode in ("worklog", "brainstorm", "journal") and not topic:
         # Plain hyphen: the topic round-trips through Windows consoles via the CLI.
-        topic = f"Worklog - {dbmod.today()}"
+        topic = f"{mode.title()} - {dbmod.today()}"
     ensure_tree()
     with dbmod.cursor() as conn:
         session_id = dbmod.create_session(
@@ -107,6 +111,85 @@ def write_prompt_file(session: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
+
+
+SWITCHABLE_MODES = ("freeform", "worklog", "brainstorm", "journal")
+
+
+def change_session_mode(session_id: int, new_mode: str) -> dict[str, Any]:
+    """Let the user fix a mis-picked mode before deciding which command to run.
+
+    Scoped to the four unscored/personal modes - `recommended`/`interview` keep their
+    topic/target-word setup and are not switch targets. Only allowed before a session
+    is `processed`: switching after Claude (or a journal's self-finalise) has already
+    written output would orphan that file and misrepresent the session.
+    """
+    if new_mode not in SWITCHABLE_MODES:
+        raise WorkflowError(f"can only switch into {', '.join(SWITCHABLE_MODES)}, got {new_mode!r}")
+    with dbmod.cursor() as conn:
+        session = dbmod.get_session(conn, session_id)
+        if session is None:
+            raise WorkflowError(f"session {session_id} does not exist")
+        old_mode = session["mode"]
+        if new_mode == old_mode:
+            raise WorkflowError(f"session {session_id} is already {new_mode}")
+        if session["status"] == "processed":
+            raise WorkflowError(
+                f"session {session_id} is already processed - fix its mode manually if needed"
+            )
+
+        audio = abspath(session.get("audio_path")) or find_recording(session_id, old_mode)
+        fields: dict[str, Any] = {
+            "mode": new_mode,
+            "transcript_path": None,
+            "transcribe_status": "none",
+            "transcribe_error": None,
+            "feedback_path": None,
+        }
+        if audio is not None and Path(audio).is_file():
+            target = recording_path(session_id, new_mode, suffix=Path(audio).suffix)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            # Not `.replace()`: on Windows a lingering reader (the frontend's <audio>
+            # element, right next to the mode dropdown, commonly still has an open
+            # streaming handle on this exact file) blocks a rename with WinError 32
+            # even though a fresh read-only open for copying succeeds fine.
+            shutil.copy2(audio, target)
+            try:
+                Path(audio).unlink()
+            except OSError:
+                # The DB now points at `target`; a stray old-mode file left behind
+                # because something still had it open costs disk space, not
+                # correctness - not worth failing the whole mode switch over.
+                log.warning("could not remove old recording after mode switch: %s", audio)
+            fields["audio_path"] = relpath(target)
+            fields["status"] = "recorded"
+        else:
+            fields["status"] = "awaiting_recording"
+
+        # Mode is embedded inside transcript.json itself, so any existing transcript
+        # is now stale, same as a re-recording (`store_recording` uses the same
+        # convention-path cleanup - `feedback_path` in the DB is always None here
+        # anyway, since it is only ever set together with status="processed", which
+        # the guard above already refuses).
+        for stale_path in (
+            transcript_path(session_id),
+            transcript_text_path(session_id),
+            feedback_path(session_id),
+        ):
+            if stale_path.is_file():
+                stale_path.unlink()
+
+        auto_topic = (session.get("topic") or "").startswith(f"{old_mode.title()} - ")
+        if new_mode in ("worklog", "brainstorm", "journal") and (
+            not session.get("topic") or auto_topic
+        ):
+            fields["topic"] = f"{new_mode.title()} - {dbmod.today()}"
+
+        dbmod.update_session(conn, session_id, **fields)
+        updated = dbmod.get_session(conn, session_id)
+    clear_queue_marker(session_id)
+    write_prompt_file(updated)
+    return updated
 
 
 # --------------------------------------------------------------------------- #
@@ -219,14 +302,21 @@ def _transcribe_session(session_id: int, *, force: bool = False) -> dict[str, An
         raise
 
     with dbmod.cursor() as conn:
-        dbmod.update_session(
-            conn,
-            session_id,
-            transcript_path=relpath(transcript_path(session_id)),
-            transcribe_status="done",
-            transcribe_error=None,
-            duration_sec=payload["audio"]["duration_sec"],
-        )
+        fields: dict[str, Any] = {
+            "transcript_path": relpath(transcript_path(session_id)),
+            "transcribe_status": "done",
+            "transcribe_error": None,
+            "duration_sec": payload["audio"]["duration_sec"],
+        }
+        if session["mode"] == "journal":
+            # No skill ever reads a journal session - the plain-text transcript *is*
+            # the entry. Finalise immediately; it must never reach the AI queue.
+            fields["status"] = "processed"
+            fields["processed_at"] = dbmod.utcnow()
+            fields["feedback_path"] = relpath(transcript_text_path(session_id))
+        dbmod.update_session(conn, session_id, **fields)
+    if session["mode"] == "journal":
+        clear_queue_marker(session_id)
     return {
         "session_id": session_id,
         "status": "transcribed",
@@ -248,6 +338,10 @@ QUEUED_HINT = (
 QUEUED_HINT_WORKLOG = (
     "Flagged for Claude. Run `/log-work` in the Claude Code console to turn this "
     "recording into a journal entry."
+)
+QUEUED_HINT_BRAINSTORM = (
+    "Flagged for Claude. Run `/process-brainstorm` in the Claude Code console to "
+    "organise this into ideas."
 )
 NOT_QUEUED_HINT = (
     "Not queued: there is no transcript for Claude to read yet. Press Process again "
@@ -278,6 +372,13 @@ def enqueue(
             raise WorkflowError(f"session {session_id} does not exist")
         if session["status"] == "awaiting_recording":
             raise WorkflowError(f"session {session_id} has no recording yet")
+        if session["mode"] == "journal":
+            # Structural, not a UI omission: a journal session finalises itself the
+            # moment it is transcribed (see _transcribe_session) and must never enter
+            # the Claude queue, even via a direct API/CLI call.
+            raise WorkflowError(
+                f"session {session_id} is a journal session - it is never queued for Claude"
+            )
     audio = abspath(session.get("audio_path")) or find_recording(session_id, session["mode"])
     if audio is None or not Path(audio).is_file():
         raise WorkflowError(f"session {session_id} has no stored audio")
@@ -304,7 +405,12 @@ def enqueue(
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(dbmod.utcnow(), encoding="utf-8")
     result["status"] = "pending"
-    result["hint"] = QUEUED_HINT_WORKLOG if session["mode"] == "worklog" else QUEUED_HINT
+    if session["mode"] == "worklog":
+        result["hint"] = QUEUED_HINT_WORKLOG
+    elif session["mode"] == "brainstorm":
+        result["hint"] = QUEUED_HINT_BRAINSTORM
+    else:
+        result["hint"] = QUEUED_HINT
     return result
 
 
@@ -348,29 +454,33 @@ def record_feedback(payload: dict[str, Any], *, markdown: str | None = None) -> 
         if not 0 <= float(value) <= 10:
             raise WorkflowError(f"score {dim}={value} is outside 0..10")
 
-    summary: dict[str, Any] = {"session_id": session_id, "words_updated": [], "words_added": []}
+    result: dict[str, Any] = {"session_id": session_id, "words_updated": [], "words_added": []}
+    title = str(payload["title"]).strip() if payload.get("title") else None
+    entry_summary = str(payload["summary"]).strip() if payload.get("summary") else None
 
     with dbmod.cursor() as conn:
         session = dbmod.get_session(conn, session_id)
         if session is None:
             raise WorkflowError(f"session {session_id} does not exist")
-        if session["mode"] == "worklog":
-            # Scoring a journal rewards performing over reporting (PRD-worklog 5.1).
+        if session["mode"] in ("worklog", "brainstorm"):
+            # Scoring a journal or an idea dump rewards performing over reporting
+            # (PRD-worklog 5.1) - those modes have their own write-back command.
+            other = "`ect worklog add`" if session["mode"] == "worklog" else "`ect brainstorm add`"
             raise WorkflowError(
-                f"session {session_id} is a worklog session - apply it with "
-                "`ect worklog add`, not `ect feedback apply`"
+                f"session {session_id} is a {session['mode']} session - apply it with "
+                f"{other}, not `ect feedback apply`"
             )
         if session["mode"] == "freeform":
             scores.pop("target_usage", None)  # N/A (PRD 9)
 
-        summary["overall"] = dbmod.insert_score(conn, session_id, scores)
-        summary["words_updated"] = _apply_reviews(
+        result["overall"] = dbmod.insert_score(conn, session_id, scores)
+        result["words_updated"] = _apply_reviews(
             conn, session_id, payload.get("target_words") or []
         )
-        summary["words_added"] = _apply_new_words(conn, payload.get("new_words") or [])
+        result["words_added"] = _apply_new_words(conn, payload.get("new_words") or [])
         _apply_suggestions(conn, session["mode"], payload.get("suggestions") or [])
 
-        path = feedback_path(session_id)
+        path = feedback_path(session_id, slugify(title) if title else None)
         if markdown is not None:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(markdown, encoding="utf-8")
@@ -381,16 +491,19 @@ def record_feedback(payload: dict[str, Any], *, markdown: str | None = None) -> 
             status="processed",
             processed_at=dbmod.utcnow(),
             feedback_path=relpath(path) if path.is_file() else None,
+            title=title,
+            summary=entry_summary,
         )
 
     clear_queue_marker(session_id)
-    summary["status"] = "processed"
-    stored = feedback_path(session_id)
+    result["status"] = "processed"
+    result["title"] = title
+    result["summary"] = entry_summary
     # None, not the path it would have had: the frontend renders whatever is on disk, so
     # reporting a path for a file that was never written hides the fact that the session
     # is processed with no feedback to show.
-    summary["feedback_path"] = relpath(stored) if stored.is_file() else None
-    return summary
+    result["feedback_path"] = relpath(path) if path.is_file() else None
+    return result
 
 
 def _apply_reviews(conn, session_id: int, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -509,13 +622,18 @@ def record_worklog_entry(
     entry_date: str,
     markdown: str,
     summary: str,
+    title: str | None = None,
     projects: list[str] | None = None,
     tags: list[str] | None = None,
     session_id: int | None = None,
 ) -> dict[str, Any]:
     """File one day's journal entry and index it. Overwrites the day's file: merging
     a second same-day recording into the existing entry is judgement, so the skill
-    reads the old entry, merges, and hands the combined markdown back here."""
+    reads the old entry, merges, and hands the combined markdown back here.
+
+    The filename carries a title slug, so "today's file" is no longer guessable from
+    the date alone - the DB row is the source of truth for where it lives (see
+    `dbmod.get_worklog_entry`, and `cmd_worklog_show`, which reads through it)."""
     entry_date = _validate_iso_date(entry_date, what="entry date")
     if not markdown.strip():
         raise WorkflowError("the entry markdown is empty")
@@ -526,10 +644,11 @@ def record_worklog_entry(
         raise WorkflowError(f"unknown worklog tags {unknown}; allowed: {', '.join(WORKLOG_TAGS)}")
 
     ensure_tree()
-    path = worklog_daily_path(entry_date)
-    path.write_text(markdown, encoding="utf-8")
+    title = (title or "").strip() or None
+    path = worklog_daily_path(entry_date, slugify(title) if title else None)
 
     with dbmod.cursor() as conn:
+        existing = dbmod.get_worklog_entry(conn, entry_date)
         if session_id is not None:
             session = dbmod.get_session(conn, session_id)
             if session is None:
@@ -538,6 +657,13 @@ def record_worklog_entry(
                 raise WorkflowError(
                     f"session {session_id} is a {session['mode']} session, not worklog"
                 )
+        path.write_text(markdown, encoding="utf-8")
+        # A title that changed between two same-day recordings means "today's file"
+        # just moved to a new name - remove the orphan rather than leaving a stale
+        # duplicate sitting next to it.
+        stale = abspath(existing["path"]) if existing else None
+        if stale is not None and stale != path and stale.is_file():
+            stale.unlink()
         entry_id = dbmod.upsert_worklog_entry(
             conn,
             entry_date=entry_date,
@@ -555,6 +681,8 @@ def record_worklog_entry(
                 status="processed",
                 processed_at=dbmod.utcnow(),
                 feedback_path=relpath(path),
+                title=title,
+                summary=summary.strip(),
             )
     if session_id is not None:
         clear_queue_marker(session_id)
@@ -564,6 +692,50 @@ def record_worklog_entry(
         "path": relpath(path),
         "session_id": session_id,
         "status": "processed" if session_id is not None else None,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# brainstorm (idea-dump write-back - deliberately not `record_feedback`: see
+# docs/adr/0005-brainstorm-journal-and-lean-brief.md)
+# --------------------------------------------------------------------------- #
+
+
+def record_brainstorm_entry(
+    *, session_id: int, markdown: str, title: str | None = None, summary: str | None = None
+) -> dict[str, Any]:
+    if not markdown.strip():
+        raise WorkflowError("the brainstorm markdown is empty")
+
+    with dbmod.cursor() as conn:
+        session = dbmod.get_session(conn, session_id)
+        if session is None:
+            raise WorkflowError(f"session {session_id} does not exist")
+        if session["mode"] != "brainstorm":
+            raise WorkflowError(
+                f"session {session_id} is a {session['mode']} session, not brainstorm"
+            )
+        title = (title or "").strip() or None
+        summary = (summary or "").strip() or None
+        path = brainstorm_path(session_id, slugify(title) if title else None)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(markdown, encoding="utf-8")
+        dbmod.update_session(
+            conn,
+            session_id,
+            status="processed",
+            processed_at=dbmod.utcnow(),
+            feedback_path=relpath(path),
+            title=title,
+            summary=summary,
+        )
+    clear_queue_marker(session_id)
+    return {
+        "session_id": session_id,
+        "path": relpath(path),
+        "title": title,
+        "summary": summary,
+        "status": "processed",
     }
 
 

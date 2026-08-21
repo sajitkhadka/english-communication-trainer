@@ -16,7 +16,7 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
   const [error, setError] = useState<string | null>(null);
   const [topic, setTopic] = useState("");
   const [creating, setCreating] = useState(false);
-  const [creatingWorklog, setCreatingWorklog] = useState(false);
+  const [creatingQuickMode, setCreatingQuickMode] = useState<Mode | null>(null);
   const [queueing, setQueueing] = useState<number | null>(null);
 
   const reloadAll = () => {
@@ -40,29 +40,45 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
     }
   };
 
-  const startWorklog = async () => {
-    setCreatingWorklog(true);
+  // worklog / brainstorm / journal: no topic or target words, the backend names the
+  // session "<Mode> - <date>" itself.
+  const startQuick = async (mode: Mode) => {
+    setCreatingQuickMode(mode);
     setError(null);
     try {
-      // The backend names it "Worklog - <date>"; no topic or target words apply.
-      const session = await api.createSession({ mode: "worklog" });
+      const session = await api.createSession({ mode });
       setActive(session);
       reloadAll();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create the worklog session.");
+      setError(err instanceof Error ? err.message : `Could not create the ${mode} session.`);
     } finally {
-      setCreatingWorklog(false);
+      setCreatingQuickMode(null);
     }
   };
 
   // Transcription is a synchronous GPU run: a second click while one is in flight
   // starts a second WhisperX load on the same 6 GB card, so the button locks.
+  const transcribeOnly = async (id: number) => {
+    setQueueing(id);
+    setError(null);
+    try {
+      await api.transcribe(id);
+      reloadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not transcribe the session.");
+    } finally {
+      setQueueing(null);
+    }
+  };
+
   const queueForClaude = async (id: number) => {
     if (queueing !== null) return;
     setError(null);
     setQueueing(id);
     try {
-      const result = await api.process(id);
+      // The transcript already exists (the row only shows this button once it does) -
+      // this step only flips the session to `pending`, it does not redo the GPU run.
+      const result = await api.process(id, false, false);
       if (result.transcription_error) {
         setError(`Transcription failed: ${result.transcription_error}`);
       } else if (!result.queued) {
@@ -186,9 +202,9 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
             <span className="muted small">{readyToProcess.length}</span>
           </div>
           <p className="card-sub">
-            Processing transcribes the audio on the GPU first; the session is only queued
-            for Claude once the transcript is ready. Claude picks it up when you run{" "}
-            <code>/process-session</code>.
+            Transcribing runs on the GPU; the session is only queued for Claude once you
+            say it&apos;s ready. <code>journal</code> sessions are never queued at all -
+            transcribing is the whole process for them.
           </p>
           <div className="table-wrap">
             <table>
@@ -212,13 +228,25 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
                       <StatusPill status={session.status} />
                     </td>
                     <td>
-                      <button
-                        className="primary"
-                        onClick={() => queueForClaude(session.id)}
-                        disabled={queueing !== null}
-                      >
-                        {queueing === session.id ? "Transcribing…" : "Process"}
-                      </button>
+                      {!session.has_transcript ? (
+                        <button
+                          className="primary"
+                          onClick={() => transcribeOnly(session.id)}
+                          disabled={queueing !== null}
+                        >
+                          {queueing === session.id ? "Transcribing…" : "Transcribe"}
+                        </button>
+                      ) : session.mode !== "journal" ? (
+                        <button
+                          className="primary"
+                          onClick={() => queueForClaude(session.id)}
+                          disabled={queueing !== null}
+                        >
+                          {queueing === session.id ? "Queuing…" : "Ready for AI processing"}
+                        </button>
+                      ) : (
+                        <span className="muted small">Transcribed - nothing to queue</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -263,8 +291,50 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
           what&apos;s next. <code>/log-work</code> turns it into a journal entry — no score.
         </p>
         <div className="btn-row">
-          <button className="primary" onClick={startWorklog} disabled={creatingWorklog}>
-            {creatingWorklog ? "Creating…" : "Record today's worklog"}
+          <button
+            className="primary"
+            onClick={() => startQuick("worklog")}
+            disabled={creatingQuickMode !== null}
+          >
+            {creatingQuickMode === "worklog" ? "Creating…" : "Record today's worklog"}
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <h2>Brainstorm</h2>
+        </div>
+        <p className="card-sub">
+          Think out loud about anything - no structure needed.{" "}
+          <code>/process-brainstorm</code> organises it into ideas — no coaching, no score.
+        </p>
+        <div className="btn-row">
+          <button
+            className="primary"
+            onClick={() => startQuick("brainstorm")}
+            disabled={creatingQuickMode !== null}
+          >
+            {creatingQuickMode === "brainstorm" ? "Creating…" : "Start a brainstorm"}
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <h2>Daily journal</h2>
+        </div>
+        <p className="card-sub">
+          Family, goals, whatever&apos;s on your mind — off the record. Transcribed for
+          your own reading, but never sent to Claude and never scored.
+        </p>
+        <div className="btn-row">
+          <button
+            className="primary"
+            onClick={() => startQuick("journal")}
+            disabled={creatingQuickMode !== null}
+          >
+            {creatingQuickMode === "journal" ? "Creating…" : "Record today's journal"}
           </button>
         </div>
       </div>

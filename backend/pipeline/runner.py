@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
-from app.paths import transcript_path
+from app.paths import transcript_path, transcript_text_path
 
 from .audio import duration_of, load_audio
 from .metrics import analyse, apply_cross_check, find_hidden_fillers, per_minute, wpm
@@ -92,6 +92,9 @@ def run(
         out = transcript_path(session_id)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Plain-text sibling: no word timings, no measurements - what content-only
+        # briefs and journal entries read instead of parsing the full JSON (app/brief.py).
+        transcript_text_path(session_id).write_text(payload["transcript"]["text"], encoding="utf-8")
         log.info("wrote %s (%.1fs audio in %.1fs)", out, duration, payload["meta"]["elapsed_sec"])
     return payload
 

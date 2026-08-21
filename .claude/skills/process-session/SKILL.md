@@ -100,6 +100,13 @@ The file has these sections, in order:
 8. **Score** - the table from step 5 below, with a one-line justification per dimension.
 9. **Next focus** - exactly one thing to fix in the next session.
 
+Also pick a short, filename-safe **title** (a few words, specific to what the session
+was actually about - "Incident retro walkthrough", not "Session 12") and a one-line
+**summary**. Both go in the JSON payload (step 6), not the markdown file itself - the
+backend stores them on the session and uses the title to name the feedback file, and the
+frontend's session list shows them in place of the raw topic so it stays scannable
+without opening every session.
+
 ## 5. Score against the rubric
 
 Score 0-10 per dimension using `docs/rubric.md`. Omit `target_usage` for `freeform`
@@ -114,6 +121,8 @@ does all the arithmetic: weighted overall, SM-2 ease/interval/due dates, mastery
 ```json
 {
   "session_id": 12,
+  "title": "Incident retro walkthrough",
+  "summary": "Walked through the payment-migration incident retro, leaned on 'mitigate' and 'leverage'",
   "scores": {
     "vocab_range": 6.5, "filler_density": 4.0, "fluency": 6.0,
     "grammar": 7.5, "structure": 6.0, "coherence": 7.0, "target_usage": 5.0
@@ -153,10 +162,11 @@ Rules for the payload:
   `target_words` with a `note` rather than to `new_words` - that is what resurfaces it.
 - `suggestions` is optional; it populates the frontend's Suggestions page.
 
-This call stores the markdown at `data/feedback/<id>.md`, links it to the session and
-flips the status to `processed`. It refuses to run without markdown - if it reports
-"no feedback markdown for session <id>", the `--markdown` path was wrong; fix it and
-re-run rather than applying the payload alone.
+This call stores the markdown at `data/feedback/<id>-<slug>.md` (using the `title` from
+the payload; falls back to `data/feedback/<id>.md` if `title` is omitted), links it to
+the session and flips the status to `processed`. It refuses to run without markdown - if
+it reports "no feedback markdown for session <id>", the `--markdown` path was wrong; fix
+it and re-run rather than applying the payload alone.
 
 ## 7. Update the profile (every run, no separate command)
 
@@ -175,7 +185,7 @@ recurring language weaknesses - fold it into the right section with a small edit
 
 ## 8. Report back
 
-Per session, briefly: id, overall score and its move versus the previous session, the
-one-line next focus, and how many words were rescheduled or added. Then the path to the
-feedback file. Keep the console summary short - the detail lives in the markdown and
+Per session, briefly: id, title, overall score and its move versus the previous session,
+the one-line next focus, and how many words were rescheduled or added. Then the path to
+the feedback file. Keep the console summary short - the detail lives in the markdown and
 the frontend renders it.

@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from .. import db as dbmod
 from .. import services
 from ..brief import brief_for_session
-from ..models import ProcessResponse, SessionCreate, SessionDetail, SessionOut
+from ..models import ProcessResponse, SessionCreate, SessionDetail, SessionModeUpdate, SessionOut
 from ..paths import abspath, feedback_path, find_recording, prompt_path, transcript_path
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -195,12 +195,28 @@ def get_prompt(session_id: int) -> Any:
 
 
 @router.post("/{session_id}/process", response_model=ProcessResponse)
-def process(session_id: int, force: bool = False) -> Any:
-    """PRD 6.3: flag intent. Claude is pulled by the user, never pushed by the app."""
+def process(session_id: int, force: bool = False, transcribe: bool | None = None) -> Any:
+    """PRD 6.3: flag intent. Claude is pulled by the user, never pushed by the app.
+
+    `transcribe=false` is the "ready for AI processing" step: the session already has
+    a transcript (the frontend's separate "Transcribe" action put it there), and this
+    call only flips it to `pending` without re-running the GPU pipeline.
+    """
     try:
-        return services.enqueue(session_id, force=force)
+        return services.enqueue(session_id, force=force, transcribe=transcribe)
     except services.WorkflowError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.patch("/{session_id}/mode", response_model=SessionOut)
+def set_mode(session_id: int, body: SessionModeUpdate) -> Any:
+    """Change a session's mode before deciding which command to process it with."""
+    try:
+        session = services.change_session_mode(session_id, body.mode)
+    except services.WorkflowError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    with dbmod.cursor() as conn:
+        return _decorate(session, conn)
 
 
 @router.post("/{session_id}/transcribe")

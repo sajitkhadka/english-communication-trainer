@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import Any
 
 from . import db as dbmod
-from .paths import abspath, transcript_path
+from .paths import abspath, transcript_path, transcript_text_path
+
+# Modes that get the lean, content-only brief instead of the fully annotated one:
+# no coaching happens on them, so filler counts, pause maps and target-word sections
+# are pure token cost with nothing for the skill to act on.
+CONTENT_ONLY_MODES = ("worklog", "brainstorm")
 
 
 def load_transcript(session_id: int, path: str | Path | None = None) -> dict[str, Any]:
@@ -303,16 +308,46 @@ def _dedupe(items: list[str]) -> list[str]:
     return out
 
 
+def _build_content_markdown(transcript: dict[str, Any], session_id: int) -> str:
+    """The lean brief for `worklog`/`brainstorm`: a tiny header plus the plain text -
+    no measurements, no per-sentence annotations, no target-word section, no score
+    history. Reads the plain-text sibling file where possible so it never has to touch
+    the JSON's word-level timing array."""
+    mode = transcript.get("mode", "?")
+    lines = [f"# Session {transcript.get('session_id')} - {mode}", ""]
+    if transcript.get("topic"):
+        lines.append(f"**Topic:** {transcript['topic']}")
+    created = transcript.get("meta", {}).get("generated_at")
+    if created:
+        lines.append(f"**Recorded:** {created}")
+    lines.append("")
+
+    text_file = transcript_text_path(session_id)
+    text = (
+        text_file.read_text(encoding="utf-8")
+        if text_file.is_file()
+        else transcript.get("transcript", {}).get("text", "")
+    )
+    lines.append(text.strip())
+    return "\n".join(lines)
+
+
 def brief_for_session(
     session_id: int, *, max_sentences: int | None = None, history: int = 5
 ) -> str:
-    """Full brief for one session, enriching target words from the vocabulary DB."""
+    """The brief for one session, mode-aware: content-only modes (`worklog`,
+    `brainstorm`) get the lean form above; coached modes get the fully annotated one,
+    enriching target words from the vocabulary DB."""
     with dbmod.cursor() as conn:
         session = dbmod.get_session(conn, session_id)
         if session is None:
             raise LookupError(f"session {session_id} does not exist")
         path = abspath(session.get("transcript_path"))
         transcript = load_transcript(session_id, path)
+
+        if session["mode"] in CONTENT_ONLY_MODES:
+            return _build_content_markdown(transcript, session_id)
+
         word_meta = {}
         for term in transcript.get("target_words") or []:
             row = dbmod.get_word_by_term(conn, term)

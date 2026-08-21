@@ -132,6 +132,23 @@ class TestRecordEntry:
         with pytest.raises(services.WorkflowError, match="not worklog"):
             add_entry(services, session_id=practice["id"])
 
+    def test_titled_entries_use_a_slugged_filename_and_show_resolves_via_the_db(
+        self, services, dbmod
+    ):
+        result = add_entry(services, title="Payment Migration Incident")
+        assert result["path"].endswith("2026-08-14-payment-migration-incident.md")
+        with dbmod.cursor() as conn:
+            entry = dbmod.get_worklog_entry(conn, "2026-08-14")
+        assert entry["path"] == result["path"]
+
+    def test_a_changed_title_on_the_same_day_removes_the_stale_file(self, services):
+        from app.paths import abspath
+
+        first = add_entry(services, title="First Title")
+        second = add_entry(services, title="Second Title", markdown="# merged\n")
+        assert not abspath(first["path"]).exists()
+        assert abspath(second["path"]).is_file()
+
     def test_the_entry_outlives_its_session(self, services, dbmod, worklog_session):
         """The journal is the archive; deleting the capture must not touch it."""
         sid = worklog_session["id"]
