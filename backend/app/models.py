@@ -79,6 +79,19 @@ class WordOut(BaseModel):
     is_due: bool = False
 
 
+class NotesOut(BaseModel):
+    markdown: str
+    path: str | None = None
+    # Opaque to the client: hand it back on save so a concurrent `/process-session`
+    # edit is caught instead of overwritten (services.write_notes).
+    version: str
+
+
+class NotesUpdate(BaseModel):
+    markdown: str
+    version: str | None = None
+
+
 class SuggestionOut(BaseModel):
     id: int
     mode: str

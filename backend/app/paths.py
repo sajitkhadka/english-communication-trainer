@@ -28,23 +28,37 @@ def ensure_tree() -> None:
         (settings.data_dir / "worklog" / sub).mkdir(parents=True, exist_ok=True)
     settings.docs_dir.mkdir(parents=True, exist_ok=True)
     seed_profile()
+    seed_notes()
+
+
+def _seed(live: Path, template: Path, fallback: str) -> Path:
+    """Copy a tracked template to its live `data/` counterpart on a fresh checkout.
+
+    Never overwrites: these are the files the user and Claude both edit by hand, and
+    they are not in git, so a clobber is unrecoverable.
+    """
+    if not live.is_file():
+        live.parent.mkdir(parents=True, exist_ok=True)
+        live.write_text(
+            template.read_text(encoding="utf-8") if template.is_file() else fallback,
+            encoding="utf-8",
+        )
+    return live
 
 
 def seed_profile() -> Path:
-    """Copy the tracked template to `data/profile.md` on a fresh checkout.
+    """`data/profile.md` - who the user is, read by `/generate-topic` (PRD 7.1)."""
+    return _seed(settings.profile_path, settings.profile_template_path, "# User Profile\n")
 
-    Never overwrites: the live profile is the one file the user and Claude both edit by
-    hand, and it is not in git, so a clobber is unrecoverable.
+
+def seed_notes() -> Path:
+    """`data/learning-notes.md` - the durable English-learning wiki (see config.Settings).
+
+    Separate from the profile because the two accumulate at different rates and are
+    read for different reasons: the profile says who is speaking, the notes say what
+    has already been taught.
     """
-    profile = settings.profile_path
-    if not profile.is_file():
-        template = settings.profile_template_path
-        profile.parent.mkdir(parents=True, exist_ok=True)
-        profile.write_text(
-            template.read_text(encoding="utf-8") if template.is_file() else "# User Profile\n",
-            encoding="utf-8",
-        )
-    return profile
+    return _seed(settings.notes_path, settings.notes_template_path, "# Learning Notes\n")
 
 
 def recording_path(session_id: int, mode: str, suffix: str = ".wav") -> Path:

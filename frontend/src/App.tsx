@@ -2,6 +2,7 @@ import { NavLink, Route, Routes } from "react-router-dom";
 
 import { api } from "./api";
 import { useAsync, useInterval } from "./hooks";
+import Notes from "./pages/Notes";
 import Practice from "./pages/Practice";
 import Progress from "./pages/Progress";
 import SessionDetail from "./pages/SessionDetail";
@@ -34,6 +35,7 @@ export default function App() {
           <NavLink to="/brainstorm">Brainstorm</NavLink>
           <NavLink to="/journal">Journal</NavLink>
           <NavLink to="/vocabulary">Vocabulary</NavLink>
+          <NavLink to="/notes">Notes</NavLink>
           <NavLink to="/suggestions">Suggestions</NavLink>
           <NavLink to="/progress">Progress</NavLink>
         </nav>
@@ -73,6 +75,7 @@ export default function App() {
           />
           <Route path="/session/:id" element={<SessionDetail onQueueChange={queue.reload} />} />
           <Route path="/vocabulary" element={<Vocabulary />} />
+          <Route path="/notes" element={<Notes />} />
           <Route path="/suggestions" element={<Suggestions />} />
           <Route path="/progress" element={<Progress />} />
           <Route

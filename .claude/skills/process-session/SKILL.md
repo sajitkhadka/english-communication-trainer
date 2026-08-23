@@ -60,6 +60,25 @@ tokens for no extra insight.
 Also read `docs/rubric.md` before scoring, every time. It holds the anchors that keep
 scores comparable across sessions.
 
+Then two cheap reads that make this session's feedback build on the previous ones
+instead of starting over:
+
+```bash
+uv run ect vocab gaps --limit 25
+```
+
+`vocab gaps` splits the corpus by whether the user actually *produces* each term:
+`dormant` (carried as a target, still never used correctly), `shaky`, `untried`, plus
+an `activation_rate` overall and per `kind`. The per-kind rates are usually where the
+finding is - idioms and phrases activate far more slowly than single words. It is a
+corpus-wide measurement, not a per-session one; section 4 below is where it turns into
+advice.
+
+Read `data/learning-notes.md` as well (repo root, not `backend/data/` - commands run
+from `backend/`). It is the durable record of what has already been coached. Do not
+spend a section restating a lesson that is already in there and already landing - note
+in one line that it is holding, and spend the words on something new.
+
 ## 4. Write the feedback
 
 Write the markdown to a **scratch file** (anywhere - a temp path is fine) and hand it to
@@ -82,23 +101,41 @@ The file has these sections, in order:
 3. **Stronger word and phrase choices** - a table: what they said -> what a senior
    engineer would say -> why. Only professional, elevating swaps. Never suggest a word
    that is merely a synonym of equal register.
-4. **Sentence structure** - concrete rewrites of the weakest 2-4 sentences, cited by
+4. **Vocabulary you already have but didn't reach for** - the active-vocabulary
+   section, and the counterpart to section 3: that one improves what they *said*, this
+   one names what they *could have* said. Open with the one number worth repeating
+   from `ect vocab gaps` (the overall `activation_rate`, and the weakest `by_kind`
+   entry). Then pick **2-4** `dormant` or `untried` terms that would genuinely have
+   fitted this session's content, and show exactly where - "at `S6` you said 'it was
+   hard to know which one to pick'; that is where `weigh the trade-off` lives". Prefer
+   phrases and idioms over single words: the per-kind rates almost always show those
+   are the ones sitting passive. Skip a term rather than manufacture a slot for it - a
+   phrase wedged into content it does not fit teaches the wrong thing.
+
+   **Do not add these terms to `target_words` in the payload.** They were not this
+   session's targets, so the user had no prompt to use them, and an SM-2 review off a
+   word they were never asked for corrupts the ease factor that makes mastery mean
+   anything. A dormant word comes back around through `/generate-topic`, which reads
+   the same report and prefers them when choosing the next session's targets.
+5. **Sentence structure** - concrete rewrites of the weakest 2-4 sentences, cited by
    `S<n>`. Name the problem (run-on, dropped subject, stacked prepositions, buried
-   verb) so it is learnable.
-5. **Grammar** - only real errors: tense, agreement, articles, prepositions, plurals.
+   verb) so it is learnable. Where one of the frames in `data/learning-notes.md`
+   would have fixed the sentence, name it - a rewrite the user can reuse beats a
+   rewrite of this one sentence.
+6. **Grammar** - only real errors: tense, agreement, articles, prepositions, plurals.
    Quote the sentence, give the correction. Do not invent errors to fill the section;
    if the grammar was clean, say so in one line.
-6. **Target-word usage** - skip entirely for `freeform`. For each target word: used or
+7. **Target-word usage** - skip entirely for `freeform`. For each target word: used or
    not, and if used, whether it was used *correctly and naturally*. A word that
    appeared but was shoehorned in counts as misused - give a corrective example
    sentence in their own context.
-7. **Model answer** - the most actionable part of the whole file. A polished rewrite of
+8. **Model answer** - the most actionable part of the whole file. A polished rewrite of
    **what the user actually said**: same content, same experiences, same claims, at the
    register they are aiming for. Do not invent achievements or facts they did not
    mention. Keep it speakable - roughly the same length as the original, natural out
    loud, not written-essay prose. Naturally include the target words they missed.
-8. **Score** - the table from step 5 below, with a one-line justification per dimension.
-9. **Next focus** - exactly one thing to fix in the next session.
+9. **Score** - the table from step 5 below, with a one-line justification per dimension.
+10. **Next focus** - exactly one thing to fix in the next session.
 
 Also pick a short, filename-safe **title** (a few words, specific to what the session
 was actually about - "Incident retro walkthrough", not "Session 12") and a one-line
@@ -160,6 +197,8 @@ Rules for the payload:
   themselves that are worth consolidating (`"source": "user_speech"`).
 - If the user under-used or misused a word that is already in the corpus, add it to
   `target_words` with a `note` rather than to `new_words` - that is what resurfaces it.
+- The dormant terms named in section 4 belong in **neither** list. They are already in
+  the corpus, and they were never this session's targets - see section 4.
 - `suggestions` is optional; it populates the frontend's Suggestions page.
 
 This call stores the markdown at `data/feedback/<id>-<slug>.md` (using the `title` from
@@ -183,7 +222,30 @@ recurring language weaknesses - fold it into the right section with a small edit
   is what makes future topics target real gaps.
 - If nothing new came up, leave the file alone and say so.
 
-## 8. Report back
+## 8. Update the learning notes (every run)
+
+`data/learning-notes.md` is the durable half of the loop: `data/feedback/<id>.md` is
+per-session and never reread, this file is what carries forward. Same shape as step 7 -
+read it, make a small edit - with one difference: it is **consolidated, not
+append-only**.
+
+- A lesson goes in only once it has shown up **twice**. One occurrence is an incident;
+  this file is for patterns.
+- A term named in section 4 goes under *Phrases and connectors to activate*, and comes
+  off that list the session it shows up unprompted.
+- Record which sentence patterns are landing under *Sentence patterns*, from what the
+  recordings actually show rather than from what the file already lists.
+- Move anything genuinely fixed to *What is working* instead of leaving it standing as
+  a warning, and merge duplicates rather than stacking them.
+- Prune. A file that only grows stops being read, which defeats the point of having it.
+- Nothing new and nothing to consolidate is a normal outcome - leave it alone and say so.
+
+Keep it distinct from the profile: *how they speak* goes here, *who they are* goes in
+`data/profile.md`. A recurring weakness is the one thing that belongs in both - the
+profile's one-line version drives future topic selection, the detail and its fix live
+here.
+
+## 9. Report back
 
 Per session, briefly: id, title, overall score and its move versus the previous session,
 the one-line next focus, and how many words were rescheduled or added. Then the path to

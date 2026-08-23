@@ -101,11 +101,12 @@ thousand.
 backend/          FastAPI app, WhisperX/Silero pipeline, SQLite, the `ect` CLI
   app/            config, db, srs, services, routers, brief, cli
   pipeline/       audio, transcribe, vad, fillers, metrics, runner
-  tests/          91 tests, no GPU required
+  tests/          165 tests, no GPU required
 frontend/         React + TypeScript (Vite)
-.claude/skills/   generate-topic, process-session, vocab-review
-data/             recordings, transcripts, feedback, prompts, profile, app.db  (gitignored)
-docs/             rubric, commands, setup, profile.example.md, adr/
+.claude/skills/   generate-topic, process-session, vocab-review, log-work, process-brainstorm
+data/             recordings, transcripts, feedback, prompts, worklog, brainstorm,
+                  profile.md, learning-notes.md, app.db                 (gitignored)
+docs/             rubric, commands, setup, profile.example.md, learning-notes.example.md, adr/
 models/           downloaded model weights                            (gitignored)
 ```
 
@@ -120,7 +121,7 @@ Two notes where this differs from the PRD's sketch:
 ## Testing
 
 ```bash
-cd backend && uv run pytest -q     # 91 tests, no GPU or model download needed
+cd backend && uv run pytest -q     # 165 tests, no GPU or model download needed
 cd frontend && npm run build       # typecheck + production build
 ```
 
@@ -131,7 +132,19 @@ itself, which is what makes it testable without a GPU.
 
 Phase 1 and 2 of [PRD §15](PRD.md) are implemented, plus interview mode from Phase 3:
 the full record → transcribe → analyse → score → reschedule loop, spaced repetition,
-all seven frontend pages, and the in-frontend Process queue.
+the frontend pages, and the in-frontend Process queue.
 
-`data/profile.md` (seeded from `docs/profile.example.md`, gitignored) is still a template — it fills itself in as `/process-session` infers
-facts about you, and topics get noticeably better once it has real content.
+Two hand-edited files carry the state that makes coaching compound, both gitignored and
+seeded from tracked templates in `docs/`:
+
+- `data/profile.md` — who is speaking: employer, stack, projects, recurring weaknesses.
+  Read in full by `/generate-topic`, so topics get noticeably better once it has real
+  content. It fills itself in as `/process-session` infers facts about you.
+- `data/learning-notes.md` — what has already been taught: the handful of sentence
+  patterns worth having as muscle memory, phrases being moved from passive to active,
+  recurring corrections. It stops feedback restarting from scratch every session, and
+  it is editable from the frontend's **Notes** page as well as by `/process-session`.
+
+The active/passive split behind that second file is measured, not guessed:
+`ect vocab gaps` splits the corpus by whether each term has ever actually been *spoken*
+rather than merely scheduled, which is the gap the due list cannot see.

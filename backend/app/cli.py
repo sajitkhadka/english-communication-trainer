@@ -28,6 +28,11 @@ VOCAB_SLICE = (
     "times_seen", "times_used_correctly", "interval_days", "source", "notes",
 )  # fmt: skip
 
+# `ect vocab gaps` is about the usage counters, so they have to survive `slim` even at
+# zero - "reviewed three times, produced none" and "never reviewed" are the two
+# different findings the whole command exists to tell apart.
+GAP_ALWAYS = ("term", "times_seen", "times_used_correctly")
+
 
 def emit(data: Any) -> None:
     if isinstance(data, str):
@@ -46,10 +51,11 @@ def read_json_arg(value: str) -> Any:
     return json.loads(value)
 
 
-def slim(row: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
+def slim(
+    row: dict[str, Any], keys: tuple[str, ...], *, always: tuple[str, ...] = ("term", "mastery")
+) -> dict[str, Any]:
     """Drop empty fields to keep the JSON handed to Claude small, but always keep the
-    two that carry meaning even when zero."""
-    always = ("term", "mastery")
+    ones that carry meaning even when zero."""
     return {k: row.get(k) for k in keys if row.get(k) not in (None, "", 0.0) or k in always}
 
 
@@ -73,6 +79,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     report["ffmpeg"] = shutil.which("ffmpeg")
     report["db_exists"] = settings.db_path.is_file()
     report["profile_exists"] = settings.profile_path.is_file()
+    report["notes_exists"] = settings.notes_path.is_file()
     report["model_cache"] = str(settings.model_cache_dir)
     emit(report)
     ok = bool(report.get("cuda_available")) and bool(report["ffmpeg"])
@@ -96,6 +103,16 @@ def cmd_vocab_list(args: argparse.Namespace) -> int:
     with dbmod.cursor() as conn:
         rows = dbmod.list_words(conn, sort=args.sort, limit=args.limit)
     emit([slim(r, VOCAB_SLICE) for r in rows])
+    return 0
+
+
+def cmd_vocab_gaps(args: argparse.Namespace) -> int:
+    """Active vs. passive corpus: what the user recognises but does not reach for."""
+    with dbmod.cursor() as conn:
+        report = dbmod.vocabulary_gaps(conn, limit=args.limit, kind=args.kind)
+    for bucket in dbmod.GAP_BUCKETS:
+        report[bucket] = [slim(r, VOCAB_SLICE, always=GAP_ALWAYS) for r in report[bucket]]
+    emit(report)
     return 0
 
 
@@ -494,6 +511,12 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     )
     p.add_argument("--limit", type=int, default=1000)
     p.set_defaults(func=cmd_vocab_list)
+    p = vocab_sub.add_parser(
+        "gaps", help="active vs. passive: terms recognised but never reached for"
+    )
+    p.add_argument("--limit", type=int, default=30, help="max terms per bucket")
+    p.add_argument("--kind", choices=["word", "phrase", "idiom"])
+    p.set_defaults(func=cmd_vocab_gaps)
     vocab_sub.add_parser("stats", help="corpus totals").set_defaults(func=cmd_vocab_stats)
     p = vocab_sub.add_parser("add", help="bulk-add words from JSON")
     p.add_argument("--json", required=True, help="file path, '-' for stdin, or a JSON string")
