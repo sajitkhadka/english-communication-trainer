@@ -669,6 +669,10 @@ td.num {
   background: var(--critical);
   animation: pulse 1.2s ease-in-out infinite;
 }
+.rec-dot.paused {
+  background: var(--text-muted);
+  animation: none;
+}
 @keyframes pulse {
   50% {
     opacity: 0.25;

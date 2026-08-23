@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { formatClock } from "./common";
 
-type Phase = "idle" | "recording" | "review" | "uploading";
+type Phase = "idle" | "recording" | "paused" | "review" | "uploading";
 
 /** Pick a container the browser can actually produce. ffmpeg decodes all of these
  *  backend-side, so we just take the first supported one. */
@@ -38,6 +38,9 @@ export default function Recorder({
   const audioCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number | null>(null);
   const startedAtRef = useRef(0);
+  // Seconds already banked by earlier record→pause stretches; the clock is this
+  // plus the time since the current stretch started, so a pause does not count.
+  const bankedRef = useRef(0);
 
   const teardown = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -72,12 +75,13 @@ export default function Recorder({
       ctx.createMediaStreamSource(stream).connect(analyser);
       const buffer = new Uint8Array(analyser.frequencyBinCount);
       const tick = () => {
+        rafRef.current = requestAnimationFrame(tick);
+        if (recorderRef.current?.state !== "recording") return;
         analyser.getByteTimeDomainData(buffer);
         let peak = 0;
         for (const sample of buffer) peak = Math.max(peak, Math.abs(sample - 128));
         setLevel(Math.min(1, (peak / 128) * 2.2));
-        setElapsed((Date.now() - startedAtRef.current) / 1000);
-        rafRef.current = requestAnimationFrame(tick);
+        setElapsed(bankedRef.current + (Date.now() - startedAtRef.current) / 1000);
       };
 
       const mimeType = pickMimeType();
@@ -97,6 +101,7 @@ export default function Recorder({
       };
       recorderRef.current = recorder;
       startedAtRef.current = Date.now();
+      bankedRef.current = 0;
       setElapsed(0);
       recorder.start(1000);
       setPhase("recording");
@@ -112,12 +117,33 @@ export default function Recorder({
     }
   };
 
+  // MediaRecorder.pause() drops the gap from the file rather than writing silence
+  // into it, so the pipeline's pause and hesitation metrics never see the break.
+  const pause = () => {
+    const recorder = recorderRef.current;
+    if (recorder?.state !== "recording") return;
+    recorder.pause();
+    bankedRef.current += (Date.now() - startedAtRef.current) / 1000;
+    setElapsed(bankedRef.current);
+    setLevel(0);
+    setPhase("paused");
+  };
+
+  const resume = () => {
+    const recorder = recorderRef.current;
+    if (recorder?.state !== "paused") return;
+    startedAtRef.current = Date.now();
+    recorder.resume();
+    setPhase("recording");
+  };
+
   const stop = () => recorderRef.current?.stop();
 
   const discard = () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setBlob(null);
     setPreviewUrl(null);
+    bankedRef.current = 0;
     setElapsed(0);
     setPhase("idle");
   };
@@ -157,16 +183,28 @@ export default function Recorder({
         </div>
       )}
 
-      {phase === "recording" && (
+      {(phase === "recording" || phase === "paused") && (
         <div className="recorder">
           <button className="record recording" onClick={stop}>
             ■ Stop
           </button>
-          <span className="rec-dot" aria-hidden="true" />
+          {phase === "recording" ? (
+            <button onClick={pause}>❚❚ Pause</button>
+          ) : (
+            <button onClick={resume}>● Resume</button>
+          )}
+          <span
+            className={phase === "paused" ? "rec-dot paused" : "rec-dot"}
+            aria-hidden="true"
+          />
           <span className="rec-time">{formatClock(elapsed)}</span>
-          <span className="level" role="meter" aria-label="Input level">
-            <span style={{ width: `${Math.round(level * 100)}%` }} />
-          </span>
+          {phase === "paused" ? (
+            <span className="secondary small">Paused — the gap is not recorded.</span>
+          ) : (
+            <span className="level" role="meter" aria-label="Input level">
+              <span style={{ width: `${Math.round(level * 100)}%` }} />
+            </span>
+          )}
         </div>
       )}
 
