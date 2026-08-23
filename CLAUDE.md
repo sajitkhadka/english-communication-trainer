@@ -143,6 +143,18 @@ must never reach Claude, by design.
   It accumulates employer, projects and weaknesses, and the repo is pushed to GitHub, so
   it is personal state: gitignored, backed up with the rest of `data/`, and seeded from
   the tracked `docs/profile.example.md` by `paths.seed_profile` (which never overwrites).
+- **`data/learning-notes.md` is a second, separate hand-edited file** on the same
+  contract (gitignored, seeded from `docs/learning-notes.example.md` by
+  `paths.seed_notes`). It holds the durable coaching record — sentence patterns,
+  phrases being activated, recurring corrections — and it is **not** folded into the
+  profile on purpose: the profile is read in full on every `/generate-topic` run and
+  has to stay short, while the notes are meant to grow. The split is *who is speaking*
+  vs. *what has already been taught*. Unlike the profile it is consolidated rather than
+  append-only; `/process-session` prunes and merges it as well as adding to it. It is
+  the one file both Claude and the frontend write to (the Notes page, `GET`/`PUT
+  /api/notes`), so a save carries the `version` it loaded and 409s rather than
+  overwriting a newer one — see `services.write_notes`. Skills still edit the file
+  directly rather than through `ect`, same as the profile.
 - **Audio decoding goes through ffmpeg** (`pipeline/audio.py`), never torchaudio — the
   browser uploads webm/opus or mp4, and the installed torchcodec backend does not work
   on Windows. A `torchcodec` import warning is expected and harmless.

@@ -41,6 +41,10 @@ class WorkflowError(RuntimeError):
     """A transition the current state does not allow."""
 
 
+class ConflictError(WorkflowError):
+    """A write that would discard a newer version someone else already saved."""
+
+
 # --------------------------------------------------------------------------- #
 # creating sessions / prompts
 # --------------------------------------------------------------------------- #
@@ -736,6 +740,60 @@ def record_brainstorm_entry(
         "title": title,
         "summary": summary,
         "status": "processed",
+    }
+
+
+# --------------------------------------------------------------------------- #
+# learning notes (the durable coaching wiki - see config.Settings.notes_path)
+# --------------------------------------------------------------------------- #
+
+
+def notes_version(markdown: str) -> str:
+    """Content hash, deliberately not an mtime.
+
+    The guard below has to be exact in both directions: a rewrite with identical
+    content is not a conflict, and an edit that happened to preserve the timestamp
+    still is one.
+    """
+    import hashlib
+
+    return hashlib.sha256(markdown.encode("utf-8")).hexdigest()[:16]
+
+
+def read_notes() -> dict[str, Any]:
+    from .paths import seed_notes
+
+    path = seed_notes()  # a fresh checkout has no live file until something asks
+    markdown = path.read_text(encoding="utf-8")
+    return {"markdown": markdown, "path": relpath(path), "version": notes_version(markdown)}
+
+
+def write_notes(markdown: str, *, version: str | None = None) -> dict[str, Any]:
+    """Save a hand-edit from the frontend.
+
+    `version` is what the editor loaded. A mismatch means the file moved underneath it
+    - almost always a `/process-session` run folding in a session's lessons - so the
+    write is refused rather than silently discarding that. The file is gitignored and
+    accumulates months of coaching, which makes a clobber unrecoverable; a 409 the user
+    resolves by reloading is the cheap side of that trade.
+    """
+    from .config import settings
+
+    if not markdown.strip():
+        raise WorkflowError("the learning notes are empty - refusing to save a blank file")
+    current = read_notes()
+    if version is not None and version != current["version"]:
+        raise ConflictError(
+            "the learning notes changed since this editor loaded them, most likely a "
+            "/process-session run. Reload to pick up the new version, reapply your edit, "
+            "then save."
+        )
+    settings.notes_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.notes_path.write_text(markdown, encoding="utf-8")
+    return {
+        "markdown": markdown,
+        "path": relpath(settings.notes_path),
+        "version": notes_version(markdown),
     }
 
 

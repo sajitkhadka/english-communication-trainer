@@ -322,6 +322,16 @@ textarea {
   min-height: 4.5rem;
 }
 
+/* The learning-notes editor holds a whole document, not a field: monospace so the
+   markdown structure stays visible, and tall enough to edit a section without scrolling
+   the page as well as the box. */
+.notes-editor {
+  min-height: 60vh;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
 label {
   display: block;
   font-size: 0.85rem;

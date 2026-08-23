@@ -52,9 +52,10 @@ after recording, before the session is `processed` — `PATCH /api/sessions/{id}
 
 ### `/generate-topic [recommended|interview|freeform] [category…]`
 
-Creates one practice session. Reads `data/profile.md` and the words due for review,
-picks 5-6 target words (a blend of due and brand-new) for `recommended`, writes the
-session row and `data/prompts/<id>.json`.
+Creates one practice session. Reads `data/profile.md`, `data/learning-notes.md`, the
+words due for review and `ect vocab gaps`, picks 5-6 target words (a blend of due,
+dormant and brand-new) for `recommended`, writes the session row and
+`data/prompts/<id>.json`.
 
 ```
 /generate-topic
@@ -73,12 +74,19 @@ session row and `data/prompts/<id>.json`.
 | `/process-session 12 --force` | reprocesses an already-processed session |
 
 Writes `data/feedback/<id>.md`, inserts the score, applies SM-2 updates to every target
-word, adds new vocabulary, and folds anything newly learned about you into
-`data/profile.md`.
+word, adds new vocabulary, and folds anything newly learned into `data/profile.md`
+(who you are) and `data/learning-notes.md` (what has already been coached).
 
 Feedback always contains: filler and hesitation analysis (textual **and** acoustic),
-stronger word/phrase/idiom swaps, sentence-structure rewrites, grammar corrections,
-target-word usage check, a **model answer**, the rubric score, and one next focus.
+stronger word/phrase/idiom swaps, **vocabulary you already have but didn't reach for**,
+sentence-structure rewrites, grammar corrections, target-word usage check, a **model
+answer**, the rubric score, and one next focus.
+
+The active-vocabulary section is the counterpart to the swaps: those improve what you
+said, this names what you could have said, drawn from the `dormant` and `untried`
+buckets of `ect vocab gaps`. Those terms are deliberately **not** written into
+`target_words` — they were never this session's targets, so an SM-2 review off them
+would corrupt the ease factor. They come back around through `/generate-topic` instead.
 
 ### `/log-work [<session_id>]`
 
@@ -101,9 +109,9 @@ practice, and `/process-session` skips it too.
 
 ### `/vocab-review [limit]`
 
-Read-only view of the vocabulary corpus: what is due, what is weakest, what has never
-been practised, and corpus stats. Never modifies scheduling — that only ever comes from
-`/process-session`.
+Read-only view of the vocabulary corpus: the active-vs-passive split and its per-kind
+activation rates, what is due, what is weakest, what has never been practised, and
+corpus stats. Never modifies scheduling — that only ever comes from `/process-session`.
 
 ---
 
@@ -120,12 +128,32 @@ uv run ect doctor       # CUDA, VRAM, ctranslate2, ffmpeg, db, profile. Exit 1 i
 
 ```bash
 uv run ect vocab due --limit 15
+uv run ect vocab gaps --limit 30 [--kind idiom]    # active vs. passive vocabulary
 uv run ect vocab list --sort mastery --limit 30    # recency|frequency|mastery|alpha|due
 uv run ect vocab stats
 uv run ect vocab add --json '[{"term":"de-risk","kind":"word","meaning":"…","example":"…"}]'
 ```
 
 `--json` accepts a file path, `-` for stdin, or a literal JSON string.
+
+`vocab gaps` answers the one question `vocab due` cannot: *is any of this actually
+being spoken?* It splits the corpus four ways from counters `feedback apply` already
+maintains — no new state, no judgement:
+
+| Bucket | Meaning |
+|---|---|
+| `active` | produced correctly in at least half its sessions, or `source = user_speech` (reached for unprompted) |
+| `dormant` | carried as a target at least once and **never** produced correctly — passive vocabulary, and the highest-value thing to practise |
+| `shaky` | produced sometimes, under half the time |
+| `untried` | never carried by a session; no evidence either way |
+
+Plus `activation_rate` overall and per `kind`, weakest kind first — idioms and phrases
+typically lag single words, which is the finding the raw due list hides. `dormant` is
+ordered by chances missed, `untried` by how long it has been sitting.
+
+Read by `/process-session` (section 4 of the feedback), `/vocab-review`, and
+`/generate-topic`, which prefers dormant terms when picking the next session's targets —
+that preference is the only mechanism that brings a dormant word back around.
 
 ### Sessions
 
@@ -254,6 +282,20 @@ uv run ect suggest add --json '[{"mode":"interview","category":"behavioural","to
 ```
 
 ---
+
+## The learning notes
+
+`data/learning-notes.md` is the durable coaching record — sentence patterns, phrases
+being moved from passive to active, recurring corrections. Unlike everything else here
+it has no `ect` subcommand: it is prose read whole, so skills open and edit the file
+directly, exactly as they do `data/profile.md`.
+
+The frontend's **Notes** page reads and edits the same file over `GET`/`PUT /api/notes`.
+Because `/process-session` writes to it too, a save carries the `version` it loaded and
+is refused with **409** if the file moved underneath it — the page then shows the newer
+version alongside the unsaved draft so the two can be merged by hand. The file is
+gitignored and accumulates months of notes, so a silent clobber would be unrecoverable;
+omitting `version` skips the check and forces the write.
 
 ## Why `brief` and not the raw transcript
 

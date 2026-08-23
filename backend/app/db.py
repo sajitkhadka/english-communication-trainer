@@ -347,6 +347,109 @@ def word_stats(conn: sqlite3.Connection) -> dict[str, Any]:
     return stats
 
 
+# --------------------------------------------------------------------------- #
+# active vs. passive vocabulary
+# --------------------------------------------------------------------------- #
+
+GAP_BUCKETS = ("dormant", "shaky", "untried")
+
+
+def _is_active(word: dict[str, Any]) -> bool:
+    """Has the user actually *produced* this term, rather than merely recognised it?
+
+    `source = 'user_speech'` settles it on its own - the term is in the corpus because
+    they reached for it unprompted, which is the definition of active vocabulary.
+    Otherwise it takes a majority of its prompted reviews landing correctly.
+    """
+    if word.get("source") == "user_speech":
+        return True
+    seen = int(word.get("times_seen") or 0)
+    return seen > 0 and int(word.get("times_used_correctly") or 0) * 2 >= seen
+
+
+def _gap_bucket(word: dict[str, Any]) -> str:
+    if _is_active(word):
+        return "active"
+    if int(word.get("times_seen") or 0) == 0:
+        return "untried"
+    # Reviewed and still never produced correctly: recognised, not reached for.
+    return "dormant" if int(word.get("times_used_correctly") or 0) == 0 else "shaky"
+
+
+def _rate(part: int, whole: int) -> float:
+    return round(part / whole, 2) if whole else 0.0
+
+
+def vocabulary_gaps(
+    conn: sqlite3.Connection, *, limit: int = 30, kind: str | None = None
+) -> dict[str, Any]:
+    """Split the corpus by whether each term is active vocabulary or passive.
+
+    Deterministic, like every other number in this app (CLAUDE.md): `times_seen`
+    counts the sessions that carried the term as a target and `times_used_correctly`
+    the ones where it was judged used correctly and naturally, so the split is
+    arithmetic over columns `record_feedback` already maintains.
+
+    `due_words` cannot answer this - it only ever asks *when* a term is next due, so a
+    word put in front of the user five times and never once produced looks identical
+    to one that is simply new. The `by_kind` rates are usually where the finding is:
+    idioms and phrases activate far more slowly than single words.
+    """
+    args: list[Any] = []
+    where = ""
+    if kind:
+        where = " WHERE kind = ?"
+        args.append(kind)
+    # `where` is built from the literal above, never from caller data; `kind` is bound.
+    rows = [dict(r) for r in conn.execute(f"SELECT * FROM words{where}", args)]  # noqa: S608
+
+    buckets: dict[str, list[dict[str, Any]]] = {
+        "active": [],
+        "dormant": [],
+        "shaky": [],
+        "untried": [],
+    }
+    by_kind: dict[str, dict[str, int]] = {}
+    for word in rows:
+        bucket = _gap_bucket(word)
+        buckets[bucket].append(word)
+        tally = by_kind.setdefault(word.get("kind") or "unspecified", {"total": 0, "active": 0})
+        tally["total"] += 1
+        tally["active"] += int(bucket == "active")
+
+    # Most chances missed first - a term ignored five times outranks one ignored once.
+    buckets["dormant"].sort(key=lambda w: (-int(w["times_seen"] or 0), w["mastery"] or 0))
+    buckets["shaky"].sort(
+        key=lambda w: _rate(int(w["times_used_correctly"] or 0), int(w["times_seen"] or 0))
+    )
+    # Longest ignored first: a term sitting untouched since the corpus was seeded is a
+    # stronger signal than one added last week.
+    buckets["untried"].sort(key=lambda w: (w["first_seen"] or "", w["id"]))
+
+    report: dict[str, Any] = {
+        "stats": {
+            "total": len(rows),
+            **{name: len(buckets[name]) for name in ("active", *GAP_BUCKETS)},
+            "activation_rate": _rate(len(buckets["active"]), len(rows)),
+        },
+        "by_kind": sorted(
+            (
+                {
+                    "kind": name,
+                    "total": tally["total"],
+                    "active": tally["active"],
+                    "activation_rate": _rate(tally["active"], tally["total"]),
+                }
+                for name, tally in by_kind.items()
+            ),
+            key=lambda item: (item["activation_rate"], -item["total"]),
+        ),
+    }
+    for name in GAP_BUCKETS:
+        report[name] = buckets[name][:limit]
+    return report
+
+
 def record_word_usage(
     conn: sqlite3.Connection,
     *,

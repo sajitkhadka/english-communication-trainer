@@ -1,6 +1,7 @@
 import type {
   Health,
   Mode,
+  Notes,
   ProcessResponse,
   ProgressPayload,
   QueuePayload,
@@ -104,6 +105,16 @@ export const api = {
     }),
 
   queue: () => request<QueuePayload>("/queue"),
+
+  notes: () => request<Notes>("/notes"),
+  // `version` is what this editor loaded; the backend 409s rather than overwriting a
+  // newer one (a /process-session run edits the same file).
+  saveNotes: (markdown: string, version: string) =>
+    request<Notes>("/notes", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ markdown, version }),
+    }),
 
   words: (sort = "recency") => request<Word[]>(`/words?sort=${sort}`),
   dueWords: (limit = 15) => request<Word[]>(`/words/due?limit=${limit}`),

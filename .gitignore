@@ -3,6 +3,8 @@
 # directory, so without it the .gitkeep negation below can never match.
 # `data/profile.md` is in here on purpose: it holds employer, projects and language
 # weaknesses. `docs/profile.example.md` is the tracked seed it is copied from.
+# `data/learning-notes.md` is covered for the same reason, seeded from
+# `docs/learning-notes.example.md`.
 data/**
 !data/**/
 !data/**/.gitkeep

@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .db import init_db
-from .routers import sessions, system, vocab
+from .routers import notes, sessions, system, vocab
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,6 +54,7 @@ app.add_middleware(
 app.include_router(sessions.router)
 app.include_router(vocab.router)
 app.include_router(system.router)
+app.include_router(notes.router)
 
 
 @app.get("/", include_in_schema=False)

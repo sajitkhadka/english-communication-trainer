@@ -63,6 +63,19 @@ class Settings(BaseSettings):
     def profile_template_path(self) -> Path:
         return self.docs_dir / "profile.example.md"
 
+    @property
+    def notes_path(self) -> Path:
+        """The live learning notes: sentence patterns, phrases being activated,
+        recurring corrections. Personal state like the profile, so it lives in `data/`
+        for the same reasons - but deliberately a separate file, because `profile.md`
+        is read in full on every `/generate-topic` run and has to stay short, while
+        this one is meant to grow. `docs/learning-notes.example.md` is its seed."""
+        return self.data_dir / "learning-notes.md"
+
+    @property
+    def notes_template_path(self) -> Path:
+        return self.docs_dir / "learning-notes.example.md"
+
 
 @lru_cache
 def get_settings() -> Settings:

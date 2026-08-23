@@ -212,6 +212,14 @@ export interface Transcript {
   };
 }
 
+/** `data/learning-notes.md` — the durable coaching wiki, shared with /process-session. */
+export interface Notes {
+  markdown: string;
+  path: string | null;
+  /** Opaque. Hand it back on save so a concurrent skill edit is caught, not overwritten. */
+  version: string;
+}
+
 export interface QueuePayload {
   pending: Session[];
   count: number;
