@@ -66,7 +66,7 @@ Then two cheap reads that make this session's feedback build on the previous one
 instead of starting over:
 
 ```bash
-uv run ect vocab gaps --limit 25
+uv run ect vocab gaps --limit 25 --brief
 ```
 
 `vocab gaps` splits the corpus by whether the user actually *produces* each term:
@@ -214,14 +214,24 @@ it and re-run rather than applying the payload alone.
 Read `data/profile.md` (repo root, not `backend/data/` - commands run from `backend/`).
 It is gitignored personal state seeded from `docs/profile.example.md`; edit the live file,
 never the template. If the session revealed anything genuinely new and durable
-about the user - role, employer, team, tech stack, current projects, interests,
-recurring language weaknesses - fold it into the right section with a small edit.
+about the user - role, employer, team, tech stack, current projects, interests - fold it
+into the right section with a small edit.
 
-- Additive only. Never rewrite or delete existing facts.
+The profile holds **who is speaking**. Language detail goes in step 8, not here
+(`docs/adr/0007-profile-holds-identity-notes-hold-language.md`).
+
+- **Additive, for every section above *Language gaps to target*.** Never rewrite or delete
+  a fact about who he is or what he works on.
+- *Current work* is grouped **by project, not by session**: a new fact joins its project's
+  bullet rather than starting a new one, and a project that ships collapses to a line.
+  That section is append-only in content, not in bullet count.
 - Only durable facts. "Worked on the payment service" belongs there; "was tired today"
   does not.
-- Recurring language weaknesses go under *Language patterns to work on*: that section
-  is what makes future topics target real gaps.
+- ***Language gaps to target* is the one consolidated section.** One line per live gap, no
+  session citations, no evidence - it exists so `/generate-topic` can aim the next topic,
+  and this file is read *in full* every time it runs. If a gap you saw is already there,
+  leave it alone; if it is genuinely new, add a line; if one is now fixed, delete the line
+  and move it to *What is working* in step 8. Never let case history accumulate here.
 - If nothing new came up, leave the file alone and say so.
 
 ## 8. Update the learning notes (every run)
@@ -242,10 +252,16 @@ append-only**.
 - Prune. A file that only grows stops being read, which defeats the point of having it.
 - Nothing new and nothing to consolidate is a normal outcome - leave it alone and say so.
 
-Keep it distinct from the profile: *how they speak* goes here, *who they are* goes in
-`data/profile.md`. A recurring weakness is the one thing that belongs in both - the
-profile's one-line version drives future topic selection, the detail and its fix live
-here.
+**This file owns all the language detail** - evidence, session history, and the fix for
+every pattern. The profile carries only a one-line summary of each live gap, to aim topic
+selection. So: *how they speak* goes here, *who they are* goes in `data/profile.md`, and a
+weakness appears in both only as one line there and the full entry here. If you are about
+to write language evidence into the profile, it belongs in this file instead.
+
+Sections, and what belongs in each: *Sentence patterns* (which frames are landing),
+*Phrases and connectors to activate* (dormant terms worth a push), *Recurring grammar
+corrections*, *Delivery habits* (fillers, pauses, sentence length under load), *Word choice
+under pressure*, *How answers end*, *What is working*.
 
 ## 9. Report back
 

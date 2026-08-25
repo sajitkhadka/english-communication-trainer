@@ -141,17 +141,28 @@ must never reach Claude, by design.
   relative `data/…` in a skill resolves to `backend/data/` — always let the backend
   resolve paths (`ect feedback apply --markdown …`) rather than writing into `data/`.
 - **The live profile is `data/profile.md`, not `docs/profile.md`** as PRD §7.1 sketches.
-  It accumulates employer, projects and weaknesses, and the repo is pushed to GitHub, so
+  It accumulates employer, projects and interests, and the repo is pushed to GitHub, so
   it is personal state: gitignored, backed up with the rest of `data/`, and seeded from
   the tracked `docs/profile.example.md` by `paths.seed_profile` (which never overwrites).
+  **It is append-only except for its last section.** *Language gaps to target* is a
+  consolidated one-line-per-gap summary; PRD §7.1's blanket "additive edits only" no
+  longer holds for it, and `/process-session` deletes a line there when a gap is fixed.
+  *Current work* stays additive but is grouped by project, not by session — a new fact
+  joins its project's bullet. See `docs/adr/0007-…`: the file is read *in full* on every
+  `/generate-topic` run, so an append-only section restating one weakness per session
+  costs its full price every run.
 - **`data/learning-notes.md` is a second, separate hand-edited file** on the same
   contract (gitignored, seeded from `docs/learning-notes.example.md` by
-  `paths.seed_notes`). It holds the durable coaching record — sentence patterns,
-  phrases being activated, recurring corrections — and it is **not** folded into the
-  profile on purpose: the profile is read in full on every `/generate-topic` run and
-  has to stay short, while the notes are meant to grow. The split is *who is speaking*
-  vs. *what has already been taught*. Unlike the profile it is consolidated rather than
-  append-only; `/process-session` prunes and merges it as well as adding to it. It is
+  `paths.seed_notes`). It holds the durable coaching record and **owns all the language
+  detail** — sentence patterns, phrases being activated, recurring corrections, delivery
+  habits, word choice, how answers end, what is working. It is **not** folded into the
+  profile on purpose: the profile is read in full on every `/generate-topic` run and has
+  to stay short, while the notes are meant to grow. The split is *who is speaking*
+  (profile) vs. *what has already been taught* (notes); a weakness appears in both only
+  as one summary line there and the full entry here. Unlike the rest of the profile it is
+  consolidated rather than append-only; `/process-session` prunes and merges it as well as
+  adding to it — which is safe because `data/feedback/<id>.md` is the immutable per-session
+  record underneath both files. It is
   the one file both Claude and the frontend write to (the Notes page, `GET`/`PUT
   /api/notes`), so a save carries the `version` it loaded and 409s rather than
   overwriting a newer one — see `services.write_notes`. Skills still edit the file

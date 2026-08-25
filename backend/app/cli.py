@@ -33,6 +33,12 @@ VOCAB_SLICE = (
 # different findings the whole command exists to tell apart.
 GAP_ALWAYS = ("term", "times_seen", "times_used_correctly")
 
+# `--brief`: what /process-session actually needs to decide whether a dormant term had a
+# slot in this session. `meaning` decides fit and `notes` says how it was missed last
+# time; `example`, `due_date`, `interval_days` and `source` are SM-2 bookkeeping the
+# backend acts on and the model never reads. Roughly half the tokens of the full report.
+GAP_BRIEF_SLICE = ("term", "kind", "meaning", "times_seen", "times_used_correctly", "notes")
+
 
 def emit(data: Any) -> None:
     if isinstance(data, str):
@@ -110,8 +116,9 @@ def cmd_vocab_gaps(args: argparse.Namespace) -> int:
     """Active vs. passive corpus: what the user recognises but does not reach for."""
     with dbmod.cursor() as conn:
         report = dbmod.vocabulary_gaps(conn, limit=args.limit, kind=args.kind)
+    keys = GAP_BRIEF_SLICE if args.brief else VOCAB_SLICE
     for bucket in dbmod.GAP_BUCKETS:
-        report[bucket] = [slim(r, VOCAB_SLICE, always=GAP_ALWAYS) for r in report[bucket]]
+        report[bucket] = [slim(r, keys, always=GAP_ALWAYS) for r in report[bucket]]
     emit(report)
     return 0
 
@@ -516,6 +523,12 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     )
     p.add_argument("--limit", type=int, default=30, help="max terms per bucket")
     p.add_argument("--kind", choices=["word", "phrase", "idiom"])
+    p.add_argument(
+        "--brief",
+        action="store_true",
+        help="drop the SM-2 bookkeeping and example sentences; keeps term, kind, "
+        "meaning, notes and the usage counters. Use this when handing gaps to Claude.",
+    )
     p.set_defaults(func=cmd_vocab_gaps)
     vocab_sub.add_parser("stats", help="corpus totals").set_defaults(func=cmd_vocab_stats)
     p = vocab_sub.add_parser("add", help="bulk-add words from JSON")

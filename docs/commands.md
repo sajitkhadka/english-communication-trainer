@@ -150,7 +150,7 @@ uv run ect doctor       # CUDA, VRAM, ctranslate2, ffmpeg, db, profile. Exit 1 i
 
 ```bash
 uv run ect vocab due --limit 15
-uv run ect vocab gaps --limit 30 [--kind idiom]    # active vs. passive vocabulary
+uv run ect vocab gaps --limit 30 [--kind idiom] [--brief]   # active vs. passive vocabulary
 uv run ect vocab list --sort mastery --limit 30    # recency|frequency|mastery|alpha|due
 uv run ect vocab stats
 uv run ect vocab add --json '[{"term":"de-risk","kind":"word","meaning":"…","example":"…"}]'
@@ -168,6 +168,14 @@ maintains — no new state, no judgement:
 | `dormant` | carried as a target at least once and **never** produced correctly — passive vocabulary, and the highest-value thing to practise |
 | `shaky` | produced sometimes, under half the time |
 | `untried` | never carried by a session; no evidence either way |
+
+`--brief` drops `example`, `due_date`, `interval_days`, `source` and `id` from each term,
+keeping `term`, `kind`, `meaning`, `notes` and the usage counters — about 40% fewer tokens
+for the same decision. `/process-session` and `/generate-topic` use it, because they only
+need to judge whether a dormant term had a slot; the SM-2 fields are bookkeeping the
+backend acts on and the model never reads. `/vocab-review` deliberately uses the full
+report — that one is written for you, not for Claude, and the examples and due dates are
+the point.
 
 Plus `activation_rate` overall and per `kind`, weakest kind first — idioms and phrases
 typically lag single words, which is the finding the raw due list hides. `dormant` is
