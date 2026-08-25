@@ -42,6 +42,10 @@ Three variants share the pipeline but end differently:
   finishes, and it is never queued for Claude at all - `enqueue`/`POST /process` refuses
   it outright. Nothing about this mode ever leaves the machine.
 
+`/process-queue` runs the whole queue whatever is in it — it routes each pending session
+to the command above that owns its mode, so a mixed queue takes one invocation instead of
+three.
+
 `worklog`, `brainstorm`, and `journal` (plus `freeform`) can be switched into or out of
 after recording, before the session is `processed` — `PATCH /api/sessions/{id}/mode` /
 `ect session set-mode <id> <mode>` — in case the wrong one got picked at record time.
@@ -69,7 +73,7 @@ dormant and brand-new) for `recommended`, writes the session row and
 
 | Invocation | Behaviour |
 |---|---|
-| `/process-session` | processes every session flagged `pending` |
+| `/process-session` | processes every coached session flagged `pending` (skips `worklog`/`brainstorm`) |
 | `/process-session 12` | session 12 only; no-ops with a clear message if already processed |
 | `/process-session 12 --force` | reprocesses an already-processed session |
 
@@ -90,13 +94,16 @@ would corrupt the ease factor. They come back around through `/generate-topic` i
 
 ### `/log-work [<session_id>]`
 
-Turns pending `worklog` sessions (the daily spoken work journal) into structured
-entries: projects, decisions with the why, hurdles, wins, competency tags from a
-controlled list, plus a short title and one-line summary. Files the entry via
-`ect worklog add`, which stores the markdown at `data/worklog/daily/<date>-<slug>.md`
-(the title, slugified), indexes it for retrieval, and marks the session processed. A
-second recording on the same date is merged, never overwritten blindly. No score —
-worklog sessions are journal captures, not practice, and `/process-session` skips them.
+Turns pending `worklog` sessions (the spoken work journal) into structured entries:
+projects, decisions with the why, hurdles, wins, competency tags from a controlled
+list, plus a short title and one-line summary. A recording usually covers one day, but
+catching up on a missed day or two in a single recording works the same way — the
+skill splits the content by the day it describes and files one entry per date. Files
+each entry via `ect worklog add`, which stores the markdown at
+`data/worklog/daily/<date>-<slug>.md` (the title, slugified), indexes it for retrieval,
+and marks the session processed. A second recording touching a date that already has
+an entry is merged, never overwritten blindly. No score — worklog sessions are journal
+captures, not practice, and `/process-session` skips them.
 
 ### `/process-brainstorm [<session_id>]`
 
@@ -106,6 +113,21 @@ Files it via `ect brainstorm add`, which stores the markdown at
 `data/brainstorm/<id>-<slug>.md` and marks the session processed. No score, no target
 words, no vocabulary updates — same reasoning as worklog: this is extraction, not
 practice, and `/process-session` skips it too.
+
+### `/process-queue [<session_id>] [--plan]`
+
+One entry point for a mixed queue. Reads `ect session pending`, buckets the sessions by
+`mode`, and hands each bucket to the skill that owns it — `worklog` to `/log-work`,
+`brainstorm` to `/process-brainstorm`, everything else to `/process-session` — then
+prints one combined summary. `--plan` shows the routing and stops; a session id routes
+just that session.
+
+It is a router and holds no domain logic of its own: no rubric, no entry format, no
+write-back call. Buckets run sequentially (transcription holds a process-wide lock) with
+the coached bucket last, since `/process-session` is the only one that rewrites
+`data/profile.md` and `data/learning-notes.md`. A `journal` session can never appear —
+`enqueue` refuses the mode — so one showing up is reported as a backend bug rather than
+routed anywhere.
 
 ### `/vocab-review [limit]`
 

@@ -53,12 +53,15 @@ Two ideas carry the design:
 ## 3. Use Cases
 
 1. **Daily capture** — end of day, talk for ~10 minutes, entry appears in the journal.
-2. **Catch-up** — "what did I do on the payment migration?" → targeted retrieval by
-   project from the index.
-3. **Periodic review** — monthly/quarterly "organise what I've been doing" → rollups.
-4. **Interview prep** — "give me STAR answers about conflict" or a mock behavioral
+2. **Catch-up capture** — missed a day or two; one recording talks through several
+   days at once ("yesterday I…, today I…") and produces one entry per day, same as if
+   each had been recorded separately.
+3. **Targeted retrieval** — "what did I do on the payment migration?" → targeted
+   retrieval by project from the index.
+4. **Periodic review** — monthly/quarterly "organise what I've been doing" → rollups.
+5. **Interview prep** — "give me STAR answers about conflict" or a mock behavioral
    round built from the user's actual events, with dates and details.
-5. **Practice the telling** — a generated behavioral question becomes an `interview`
+6. **Practice the telling** — a generated behavioral question becomes an `interview`
    session; the existing pipeline scores the spoken delivery of the user's own story.
 
 ---
@@ -75,6 +78,13 @@ Two ideas carry the design:
    the session, and flips it to `processed`.
 3. If a second recording lands on the same date, the skill merges into that day's
    existing entry rather than creating a sibling file.
+4. **Missed a day or two?** One recording can talk through several calendar days at
+   once. The skill splits the brief's content by the day it's about (resolving
+   relative references like "yesterday" against the session's recorded timestamp) and
+   calls `ect worklog add` once per date — each date still merges with any existing
+   entry exactly as in (3). Nothing about the backend changes for this case: a session
+   simply ends up linked to whichever date's entry was filed last, and every date gets
+   its own file and index row regardless of how many calendar days back it covers.
 
 ### 4.2 Monthly rollup
 1. `/log-work` finishes by checking `ect worklog rollup status`; if a completed month

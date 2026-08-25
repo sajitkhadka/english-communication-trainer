@@ -116,8 +116,9 @@ user actions — "Transcribe" (`POST /transcribe`, leaves `status` at `recorded`
 `pending`) — so nothing reaches the queue by accident. `services.enqueue` still accepts
 one combined call (`transcribe` left unset) for "Process again"/"Re-queue", but only a
 session with a transcript is ever queueable, so the queue never advertises work Claude
-cannot do; the user runs `/process-session` (or `/log-work`, `/process-brainstorm`)
-themselves (`docs/adr/0003-…`). `services.transcribe_session` holds a process-wide lock:
+cannot do; the user runs `/process-session` (or `/log-work`, `/process-brainstorm`, or
+`/process-queue`, which routes a mixed queue to those three) themselves
+(`docs/adr/0003-…`). `services.transcribe_session` holds a process-wide lock:
 two concurrent WhisperX loads do not fit in 6 GB and take the whole worker down
 natively, which leaves `transcribe_status` stuck at `running` with no exception to
 record. Any UI text about processing must stay honest about that — `ProcessResponse.hint`

@@ -31,9 +31,11 @@ uv run ect session show 12          # specific id - check `status` before doing 
 If a specific session is already `processed` and `--force` was not passed, say so
 plainly and stop. If nothing is pending, say that and stop.
 
-**Skip sessions whose `mode` is `worklog`** - they are journal captures, not practice,
-and belong to `/log-work`. If the queue contains only worklog sessions, say so and
-point the user at `/log-work` instead.
+**Skip sessions whose `mode` is `worklog` or `brainstorm`** - they are captures, not
+practice, and belong to `/log-work` and `/process-brainstorm` respectively. The backend
+refuses them anyway (`record_feedback` rejects both), so processing one only wastes a
+brief. If the queue holds nothing else, say so and point the user at the right command -
+or at `/process-queue`, which routes a mixed queue for you.
 
 ## 2. Make sure it is transcribed
 

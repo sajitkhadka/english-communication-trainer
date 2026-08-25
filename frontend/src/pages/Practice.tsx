@@ -284,11 +284,13 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
 
       <div className="card">
         <div className="card-head">
-          <h2>Daily worklog</h2>
+          <h2>Worklog</h2>
         </div>
         <p className="card-sub">
           Ten minutes on your day: what you did, decisions and why, hurdles, wins,
-          what&apos;s next. <code>/log-work</code> turns it into a journal entry — no score.
+          what&apos;s next. Missed a day or two? Talk through all of them in one
+          recording — <code>/log-work</code> splits it into one entry per day. No
+          score.
         </p>
         <div className="btn-row">
           <button
@@ -296,7 +298,7 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
             onClick={() => startQuick("worklog")}
             disabled={creatingQuickMode !== null}
           >
-            {creatingQuickMode === "worklog" ? "Creating…" : "Record today's worklog"}
+            {creatingQuickMode === "worklog" ? "Creating…" : "Record worklog"}
           </button>
         </div>
       </div>

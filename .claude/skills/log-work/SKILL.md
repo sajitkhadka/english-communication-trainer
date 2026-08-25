@@ -5,8 +5,10 @@ description: Turn recorded worklog sessions (daily spoken work journal) into str
 
 # log-work
 
-Turn a spoken end-of-day worklog recording into one structured journal entry. This is
-**extraction, not language coaching**: no score, no rubric, no vocabulary updates. The
+Turn a spoken worklog recording into one or more structured journal entries — a
+recording usually covers just today, but catching up on a missed day or two in one
+sitting is expected and handled the same way. This is **extraction, not language
+coaching**: no score, no rubric, no vocabulary updates. The
 entry is the material future STAR answers and quarterly reviews are built from, so the
 one thing that matters is capturing the *why* behind decisions and the *impact* of
 outcomes — exactly what the user will not remember in three months.
@@ -45,21 +47,43 @@ This is the lean, content-only brief (no filler counts, no pause map, no target-
 section) - just the topic and the plain transcript text. Read it for content: what
 happened, what was decided and why, what went wrong, what shipped.
 
-## 4. Determine the entry date, and merge if it already exists
+## 4. Determine which day(s) this recording covers
 
-The entry date is the local calendar day the session was recorded (`created_at` on
-`ect session show 12` is UTC — late-night recordings may belong to the previous local
-day; when ambiguous, ask nothing and use the local date of `created_at`).
+The default case is one recording, one day: the entry date is the local calendar day
+the session was recorded (`created_at` on `ect session show 12` is UTC — late-night
+recordings may belong to the previous local day; when ambiguous, ask nothing and use
+the local date of `created_at`).
+
+**Catch-up recordings are expected, not an edge case.** If the user missed a day or
+two, they will talk through several days in one sitting ("yesterday I…, then this
+morning I…", "Monday was mostly the migration, Tuesday was firefighting the outage,
+today I…"). Read the whole brief before deciding anything:
+
+- If it is all one day's work, proceed as a single entry (step 5-6, once).
+- If the content clearly splits across multiple calendar days, treat it as **one
+  entry per day mentioned**, each written and filed separately (repeat step 5-6 once
+  per date). Resolve relative references ("yesterday", "two days ago", "Monday")
+  against the session's `**Recorded:**` timestamp in the brief, which anchors "today."
+- Attribute material by what it's *about*, not recording order — a sentence about
+  Tuesday's outage goes in Tuesday's entry even if it's mentioned last. If a piece of
+  content can't be confidently pinned to one of the days already identified, put it in
+  the most recent day discussed rather than guessing a date nobody said.
+- Never invent a date. If the user only gives relative days ("yesterday", "the day
+  before that") without naming a weekday or date, compute the ISO date yourself from
+  the recording's local date — don't ask, don't leave it vague.
+
+For each date identified, check whether an entry already exists before writing:
 
 ```bash
 uv run ect worklog show 2026-08-14   # errors if no entry exists - that's fine
 ```
 
-If an entry already exists for that date, this recording is an addition to the same
-day: merge the new material into the existing sections and submit the **combined**
+If an entry already exists for that date, this recording is an addition to that day
+(true whether it's a same-day follow-up or a catch-up recording covering an earlier
+gap): merge the new material into the existing sections and submit the **combined**
 entry. `ect worklog add` overwrites the day's file — never lose what was already there.
 
-## 5. Write the entry
+## 5. Write the entry (repeat once per date from step 4)
 
 Write to a scratch file (temp path is fine — the backend owns the canonical location).
 Format, sections always present, `-` when there is nothing to report:
@@ -100,7 +124,7 @@ Rules:
   mentoring, failure, delivery, influence`. Tag what the day *evidences*, not what it
   mentions. 1-3 tags is typical; zero is fine.
 
-## 6. File it
+## 6. File it (repeat once per date from step 4)
 
 ```bash
 uv run ect worklog add --markdown /path/to/entry.md --date 2026-08-14 \
@@ -117,6 +141,12 @@ filename-safe label (a few words); it becomes part of the stored filename
 Always include both, even on a thin day. This call indexes the entry, links the session,
 and flips it to `processed`. Do not use `ect feedback apply` for worklog sessions — the
 backend refuses it by design.
+
+A catch-up recording spanning several days means several calls to `ect worklog add`,
+one per date, all with the **same** `--session <id>`. That's fine — the backend links
+whichever entry is filed last as the session's canonical one, but every date still gets
+its own file and index row; nothing is lost. Only the last call needs to flip the
+session to `processed`, but calling it on every date is harmless since it's idempotent.
 
 ## 7. Update the profile
 
@@ -136,5 +166,6 @@ and the user's call.
 
 ## 9. Report back
 
-Per session, briefly: the entry date, the one-line summary, projects and tags, whether
-it merged into an existing entry, and the file path. Plus the rollup nudge if any.
+Per session, briefly: which date(s) it produced entries for (plural if it was a
+catch-up recording), each one's summary, projects and tags, whether it merged into an
+existing entry, and the file path. Plus the rollup nudge if any.
