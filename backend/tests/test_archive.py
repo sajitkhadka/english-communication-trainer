@@ -288,6 +288,45 @@ class TestCli:
         assert main(["archive", "status", "--json"]) == 0
         assert json.loads(capsys.readouterr().out)["totals"]["sessions"] == 1
 
+    def test_sha256_manifest_is_written_with_lf_for_the_machine_that_reads_it(
+        self, data_dir, tmp_path, capsys
+    ):
+        """Regression: this is generated on Windows and consumed by `sha256sum -c` on
+        Linux. With the default newline translation every line ends CRLF, coreutils
+        looks for a filename ending in a carriage return, and reports all 18 files
+        missing - which reads as catastrophic data loss rather than a text bug."""
+        from app.cli import main
+
+        session_id, path = make_session(data_dir)
+        _fake_archive_row(session_id, path)
+        out = tmp_path / "manifest.sha256"
+
+        assert main(["archive", "manifest", "--format", "sha256", "--out", str(out)]) == 0
+        raw = out.read_bytes()
+
+        assert b"\r" not in raw, "CRLF here makes sha256sum -c fail on every line"
+        assert raw.endswith(b"\n")
+        digest, _, name = raw.decode().splitlines()[0].partition("  ")
+        assert len(digest) == 64
+        assert not name.startswith("data/recordings/"), (
+            "paths are relative to the recordings dir, so the check runs from there"
+        )
+
+    def test_sha256_manifest_matches_what_sha256sum_would_compute(self, data_dir, tmp_path):
+        """The hashes come out of the DB, not from re-reading the file, so they are only
+        useful if they still agree with the file on disk."""
+        import hashlib
+
+        from app.cli import main
+
+        session_id, path = make_session(data_dir)
+        _fake_archive_row(session_id, path)
+        out = tmp_path / "manifest.sha256"
+        main(["archive", "manifest", "--format", "sha256", "--out", str(out)])
+
+        digest = out.read_text().split()[0]
+        assert digest == hashlib.sha256(path.read_bytes()).hexdigest()
+
     def test_verify_exits_nonzero_when_something_is_wrong(self, data_dir, capsys):
         from app.cli import main
 

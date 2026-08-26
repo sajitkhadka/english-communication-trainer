@@ -564,7 +564,13 @@ def cmd_archive_manifest(args: argparse.Namespace) -> int:
         body = json.dumps(manifest, indent=2, ensure_ascii=False)
 
     if args.out:
-        Path(args.out).write_text(body, encoding="utf-8")
+        # newline="\n" explicitly. On Windows the default translates it to CRLF, and
+        # `sha256sum -c` on the server then looks for a filename with a trailing CR
+        # and reports every file missing. The manifest is written on whichever machine
+        # holds the recordings and read on the server, so it is always written for the
+        # reader.
+        with open(args.out, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(body)
         print(f"{manifest['count']} files -> {args.out}")
         return 0
     print(body, end="" if args.format == "sha256" else "\n")
