@@ -167,6 +167,15 @@ must never reach Claude, by design.
   /api/notes`), so a save carries the `version` it loaded and 409s rather than
   overwriting a newer one — see `services.write_notes`. Skills still edit the file
   directly rather than through `ect`, same as the profile.
+- **Recordings are not in the data repo, and `ect archive` is what tracks them.** They
+  were 102 MB against 1.8 MB for everything else, so `data/.gitignore` excludes the audio
+  (ADR 0008). That means `git status` no longer answers "is this file still here and still
+  itself" - `ect archive track` hashes each recording into `recording_archives`, and
+  `./backup-recordings.ps1` copies them to the home server over rclone/sftp and confirms
+  with `sha256sum -c` before recording `synced_at`. **Nothing sets `synced_at`
+  automatically**: a transfer exiting 0 is not evidence the bytes arrived, and that flag is
+  what would later license deleting a local copy. Originals are kept; `archive compress`
+  exists but is opt-in, because the recordings are for listening back to.
 - **Audio decoding goes through ffmpeg** (`pipeline/audio.py`), never torchaudio — the
   browser uploads webm/opus or mp4, and the installed torchcodec backend does not work
   on Windows. A `torchcodec` import warning is expected and harmless.

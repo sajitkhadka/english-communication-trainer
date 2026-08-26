@@ -355,6 +355,57 @@ never calls `brief` at all — see the Journal section above.
 
 ---
 
+## The recording archive
+
+```bash
+./backup-recordings.ps1                       # the whole thing: track, copy, verify, mark
+./backup-recordings.ps1 -DryRun               # show what would move, change nothing
+```
+
+That script is the day-to-day command. It needs `-Remote` (an rclone remote and path) and
+`-SshTarget` (user@host, for the verify step), or the equivalent `ECT_ARCHIVE_REMOTE` /
+`ECT_ARCHIVE_SSH` environment variables. Underneath it:
+
+```bash
+uv run ect archive status                     # table; --json for the machine-readable form
+uv run ect archive track [--rehash]           # hash recordings and record them
+uv run ect archive manifest --format sha256 --out data/recordings/.manifest.sha256
+uv run ect archive verify [--deep]            # disk vs. what was recorded; --deep re-hashes
+uv run ect archive synced --target homeserver:/srv/ect [--session 21 22]
+uv run ect archive compress [--bitrate 24] [--drop-original]    # optional, see below
+```
+
+Recordings are **not** in the data repo — see
+`docs/adr/0008-recordings-out-of-git.md`. They were 102 MB against 1.8 MB for everything
+else, and git cannot shed that later without a rewrite. Leaving git removed the inventory
+as much as the storage, so `track` is what replaces `git status`: it hashes each recording
+into `recording_archives`, which is the only thing that can later say a file is still here
+and still itself. Cheap to re-run — an unchanged size is skipped, so it costs one `stat`
+per session, not a re-read of 100 MB. `--rehash` forces the full read.
+
+`status` shows, per session, whether the file is `present`, whether it is `tracked`, which
+copy exists (`original` / `archive`), and when it was last confirmed off this machine. An
+untracked recording prints `NO` rather than looking fine — that is the quiet failure this
+exists to prevent.
+
+**`synced` is a separate, explicit command and nothing sets it automatically.** A transfer
+exiting 0 means a transfer started and did not error; it does not mean the bytes arrived
+intact. Since "a copy exists off this machine" is the claim that licenses deleting a local
+file, it is recorded by whatever actually checked — which is why the script runs
+`sha256sum -c` on the server over SSH before it calls this.
+
+Moving the bytes is deliberately not `ect`'s job: `rclone copy` handles resumption and
+partial transfers better than anything worth writing here, and `manifest --format sha256`
+makes the far end checkable with plain coreutils. `copy`, not `sync` — the far end is an
+archive, so a file deleted here must never be deleted there.
+
+`compress` is **optional and off by default.** It transcodes to mono Opus at speech
+bitrate (5.4x measured; MediaRecorder writes a flat 129 kbps whatever the content), but
+the recordings exist to be listened back to, and that is precisely what a lossy-to-lossy
+re-encode degrades. It is there for when disk pressure changes the trade.
+
+---
+
 ## Running the server
 
 ```bash

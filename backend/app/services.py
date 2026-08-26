@@ -7,6 +7,7 @@ keep one definition of each state change.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -822,3 +823,427 @@ def worklog_rollup_status() -> dict[str, Any]:
         "rollups": sorted(rolled),
         "missing": [m for m in months if m < current and m not in rolled],
     }
+
+
+# --------------------------------------------------------------------------------------
+# Recording archive (ADR 0008)
+#
+# Recordings are the one artifact the data repo does not hold, so `git status` cannot
+# answer "is this safe to lose?" any more. These functions are what answers it: hash the
+# original, transcode a small archive copy, and record where each one stands. Nothing
+# here is on the recording or transcription path - an unarchived session behaves exactly
+# as it always did.
+# --------------------------------------------------------------------------------------
+
+ARCHIVE_SUFFIX = ".opus"
+
+
+def _sha256(path: Path, *, chunk: int = 1 << 20) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        while block := fh.read(chunk):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def archive_path_for(source: Path) -> Path:
+    """`recordings/<mode>/12.webm` -> `recordings/<mode>/12.opus`, beside the original.
+
+    Deliberately not a separate `archive/` tree: the mode directory is already the
+    organising idea, and a sync tool pointed at `recordings/` then moves both the
+    archives and anything not yet compressed without a second rule.
+    """
+    return source.with_suffix(ARCHIVE_SUFFIX)
+
+
+def _archive_row(conn, session_id: int) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM recording_archives WHERE session_id = ?", (session_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def track_recordings(*, rehash: bool = False) -> dict[str, Any]:
+    """Hash every recording and record it, without transcoding anything.
+
+    This is the step that makes an *uncompressed* archive trackable. Compression is
+    optional (ADR 0008) but knowing what exists is not: once the audio is out of git,
+    nothing else can tell you that a file is still here and still the file you recorded.
+
+    Cheap and idempotent - a recording whose size still matches its row is skipped, so
+    a re-run costs one `stat` per session rather than re-reading 100 MB. `rehash` forces
+    the full read when you want to prove integrity rather than assume it.
+    """
+    added, updated, skipped, missing = [], [], [], []
+    with dbmod.cursor() as conn:
+        rows = conn.execute(
+            """SELECT s.id, s.audio_path, a.source_bytes, a.source_sha256, a.source_present
+                 FROM sessions s
+                 LEFT JOIN recording_archives a ON a.session_id = s.id
+                WHERE s.audio_path IS NOT NULL
+                ORDER BY s.id"""
+        ).fetchall()
+        known = [dict(r) for r in rows]
+
+    for row in known:
+        session_id, rel = row["id"], row["audio_path"]
+        path = abspath(rel)
+        if not path or not path.is_file():
+            # Already recorded as deliberately dropped? Then this is expected, not a loss.
+            if row["source_sha256"] and not row["source_present"]:
+                continue
+            missing.append({"session_id": session_id, "path": rel})
+            continue
+
+        size = path.stat().st_size
+        if row["source_sha256"] and row["source_bytes"] == size and not rehash:
+            skipped.append(session_id)
+            continue
+
+        digest = _sha256(path)
+        is_new = not row["source_sha256"]
+        changed = bool(row["source_sha256"]) and digest != row["source_sha256"]
+        with dbmod.cursor() as conn:
+            conn.execute(
+                """INSERT INTO recording_archives
+                       (session_id, source_path, source_bytes, source_sha256,
+                        source_present, verified_at)
+                   VALUES (?,?,?,?,1,?)
+                   ON CONFLICT(session_id) DO UPDATE SET
+                       source_path=excluded.source_path,
+                       source_bytes=excluded.source_bytes,
+                       source_sha256=excluded.source_sha256,
+                       source_present=1,
+                       verified_at=excluded.verified_at""",
+                (session_id, relpath(path), size, digest, dbmod.utcnow()),
+            )
+        entry = {"session_id": session_id, "bytes": size}
+        if is_new:
+            added.append(entry)
+        else:
+            updated.append({**entry, "content_changed": changed})
+
+    return {
+        "tracked": len(added) + len(updated) + len(skipped),
+        "added": added,
+        "updated": updated,
+        "unchanged": skipped,
+        "missing": missing,
+    }
+
+
+def compress_recording(
+    session_id: int, *, bitrate_kbps: int = 24, drop_original: bool = False
+) -> dict[str, Any]:
+    """Transcode one session's recording to low-bitrate Opus and record it.
+
+    Idempotent: a session whose archive already exists at the same bitrate is returned
+    untouched rather than re-encoded, because every re-encode of a lossy source loses a
+    little more. Pass a different `bitrate_kbps` to deliberately redo one.
+
+    `drop_original` is refused unless the archive verifies on disk first - deleting the
+    only copy against an unchecked file is the one mistake this whole feature exists to
+    prevent.
+    """
+    from pipeline.audio import AudioError, transcode_opus
+
+    with dbmod.cursor() as conn:
+        session = dbmod.get_session(conn, session_id)
+        if not session:
+            raise ValueError(f"no session {session_id}")
+        source_rel = session.get("audio_path")
+        if not source_rel:
+            raise ValueError(f"session {session_id} has no recording")
+        source = abspath(source_rel)
+        existing = _archive_row(conn, session_id)
+
+    archive = archive_path_for(source)
+    if (
+        existing
+        and existing.get("archive_path")
+        and existing.get("bitrate_kbps") == bitrate_kbps
+        and archive.is_file()
+    ):
+        return {**existing, "skipped": "already archived at this bitrate"}
+
+    if not source.is_file():
+        # The original is gone but an archive may still be here and perfectly good;
+        # say which, rather than a bare "file not found".
+        if archive.is_file():
+            raise FileNotFoundError(
+                f"session {session_id}: original {source_rel} is gone, but "
+                f"{relpath(archive)} exists - nothing to compress"
+            )
+        raise FileNotFoundError(f"session {session_id}: recording {source_rel} not found")
+
+    source_bytes, source_hash = source.stat().st_size, _sha256(source)
+    try:
+        transcode_opus(source, archive, bitrate_kbps=bitrate_kbps)
+    except AudioError as exc:
+        raise RuntimeError(f"session {session_id}: {exc}") from exc
+
+    archive_bytes, archive_hash = archive.stat().st_size, _sha256(archive)
+    now = dbmod.utcnow()
+
+    removed = False
+    if drop_original:
+        # Re-hash rather than trusting the value we just computed: this is the only
+        # branch that destroys data, so it re-reads the file it is about to rely on.
+        if _sha256(archive) != archive_hash:
+            raise RuntimeError(f"session {session_id}: archive changed under us, keeping original")
+        source.unlink()
+        removed = True
+
+    with dbmod.cursor() as conn:
+        conn.execute(
+            """INSERT INTO recording_archives
+                   (session_id, source_path, source_bytes, source_sha256, source_present,
+                    archive_path, archive_bytes, archive_sha256, bitrate_kbps,
+                    compressed_at, verified_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(session_id) DO UPDATE SET
+                   source_path=excluded.source_path, source_bytes=excluded.source_bytes,
+                   source_sha256=excluded.source_sha256,
+                   source_present=excluded.source_present,
+                   archive_path=excluded.archive_path,
+                   archive_bytes=excluded.archive_bytes,
+                   archive_sha256=excluded.archive_sha256,
+                   bitrate_kbps=excluded.bitrate_kbps,
+                   compressed_at=excluded.compressed_at,
+                   verified_at=excluded.verified_at""",
+            (
+                session_id,
+                relpath(source),
+                source_bytes,
+                source_hash,
+                0 if removed else 1,
+                relpath(archive),
+                archive_bytes,
+                archive_hash,
+                bitrate_kbps,
+                now,
+                now,
+            ),
+        )
+        row = _archive_row(conn, session_id)
+    return {
+        **row,
+        "saved_bytes": source_bytes - archive_bytes,
+        "ratio": round(source_bytes / archive_bytes, 1) if archive_bytes else None,
+        "original_removed": removed,
+    }
+
+
+def compress_pending(
+    *, bitrate_kbps: int = 24, drop_original: bool = False, limit: int | None = None
+) -> dict[str, Any]:
+    """Compress every recording that has no archive yet. Never stops on one bad file -
+    a single unreadable recording must not block the rest of the backlog."""
+    done, failed, skipped = [], [], []
+    for entry in archive_status()["sessions"]:
+        if entry["compressed"]:
+            skipped.append(entry["session_id"])
+            continue
+        if not entry["source_present"]:
+            failed.append({"session_id": entry["session_id"], "error": "recording not on disk"})
+            continue
+        if limit is not None and len(done) >= limit:
+            break
+        try:
+            result = compress_recording(
+                entry["session_id"], bitrate_kbps=bitrate_kbps, drop_original=drop_original
+            )
+            done.append(
+                {
+                    "session_id": entry["session_id"],
+                    "archive_path": result.get("archive_path"),
+                    "saved_bytes": result.get("saved_bytes", 0),
+                }
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            failed.append({"session_id": entry["session_id"], "error": str(exc)})
+    return {
+        "compressed": done,
+        "failed": failed,
+        "already_archived": skipped,
+        "saved_bytes": sum(d["saved_bytes"] or 0 for d in done),
+    }
+
+
+def archive_status() -> dict[str, Any]:
+    """What exists, what is compressed, what is off this machine - one row per session
+    that ever had audio. This is the answer to "is it safe to lose the local copy?"."""
+    with dbmod.cursor() as conn:
+        sessions = conn.execute(
+            """SELECT s.id, s.mode, s.duration_sec, s.audio_path, a.*
+                 FROM sessions s
+                 LEFT JOIN recording_archives a ON a.session_id = s.id
+                WHERE s.audio_path IS NOT NULL
+                ORDER BY s.id"""
+        ).fetchall()
+
+    out, totals = (
+        [],
+        {
+            "source_bytes": 0,
+            "archive_bytes": 0,
+            "untracked": 0,
+            "uncompressed": 0,
+            "unsynced": 0,
+            "missing": 0,
+        },
+    )
+    for raw in sessions:
+        row = dict(raw)
+        source = abspath(row["audio_path"])
+        source_here = bool(source and source.is_file())
+        archive = abspath(row.get("archive_path")) if row.get("archive_path") else None
+        archive_here = bool(archive and archive.is_file())
+
+        dropped = bool(row.get("source_sha256")) and not row.get("source_present")
+        if source_here or archive_here:
+            state = "present"
+        elif dropped:
+            # The original was deliberately deleted after compressing; nothing is wrong.
+            state = "present" if archive_here else "missing"
+        else:
+            state = "missing"
+
+        source_bytes = source.stat().st_size if source_here else (row.get("source_bytes") or 0)
+        archive_bytes = archive.stat().st_size if archive_here else 0
+        totals["source_bytes"] += source_bytes if source_here else 0
+        totals["archive_bytes"] += archive_bytes
+        tracked = bool(row.get("source_sha256"))
+        if not tracked:
+            totals["untracked"] += 1
+        if source_here and not archive_here:
+            totals["uncompressed"] += 1
+        if state != "missing" and not row.get("synced_at"):
+            totals["unsynced"] += 1
+        if state == "missing":
+            totals["missing"] += 1
+
+        out.append(
+            {
+                "session_id": row["id"],
+                "mode": row["mode"],
+                "duration_sec": row["duration_sec"],
+                "state": state,
+                "tracked": tracked,
+                "compressed": archive_here,
+                "source_path": row["audio_path"],
+                "source_present": source_here,
+                "source_bytes": source_bytes,
+                "archive_path": row.get("archive_path"),
+                "archive_bytes": archive_bytes or None,
+                "bitrate_kbps": row.get("bitrate_kbps"),
+                "synced_at": row.get("synced_at"),
+                "sync_target": row.get("sync_target"),
+            }
+        )
+
+    totals["sessions"] = len(out)
+    totals["reclaimable_bytes"] = sum(
+        e["source_bytes"] for e in out if e["compressed"] and e["source_present"]
+    )
+    return {"totals": totals, "sessions": out}
+
+
+def archive_manifest() -> dict[str, Any]:
+    """The list a sync tool should move, with hashes, so the copy at the far end can be
+    checked without trusting the transport. Emitted as a file, not a protocol: rsync,
+    rclone and Syncthing all do the moving better than this could."""
+    with dbmod.cursor() as conn:
+        rows = [
+            dict(r) for r in conn.execute("SELECT * FROM recording_archives ORDER BY session_id")
+        ]
+    files = []
+    for row in rows:
+        for kind in ("source", "archive"):
+            rel = row.get(f"{kind}_path")
+            if not rel or (kind == "source" and not row.get("source_present")):
+                continue
+            path = abspath(rel)
+            files.append(
+                {
+                    "session_id": row["session_id"],
+                    "kind": kind,
+                    "path": rel,
+                    "bytes": row.get(f"{kind}_bytes"),
+                    "sha256": row.get(f"{kind}_sha256"),
+                    "present": bool(path and path.is_file()),
+                }
+            )
+    return {"generated_at": dbmod.utcnow(), "count": len(files), "files": files}
+
+
+def verify_archives(*, deep: bool = False) -> dict[str, Any]:
+    """Re-check what is on disk against what was recorded.
+
+    `deep` re-hashes; the default only checks existence and size, which catches the
+    realistic failures (a file moved, truncated, or half-synced) in a fraction of the
+    time. A hash mismatch is reported, never repaired - silently re-encoding over a
+    file that changed unexpectedly would destroy the evidence of whatever changed it.
+    """
+    problems, checked = [], 0
+    with dbmod.cursor() as conn:
+        rows = [
+            dict(r) for r in conn.execute("SELECT * FROM recording_archives ORDER BY session_id")
+        ]
+
+    for row in rows:
+        for kind in ("source", "archive"):
+            rel = row.get(f"{kind}_path")
+            if not rel or (kind == "source" and not row.get("source_present")):
+                continue
+            path = abspath(rel)
+            expected_bytes, expected_hash = row.get(f"{kind}_bytes"), row.get(f"{kind}_sha256")
+            if not path or not path.is_file():
+                problems.append({"session_id": row["session_id"], "kind": kind,
+                                 "path": rel, "problem": "missing"})  # fmt: skip
+                continue
+            checked += 1
+            actual = path.stat().st_size
+            if expected_bytes and actual != expected_bytes:
+                problems.append({"session_id": row["session_id"], "kind": kind, "path": rel,
+                                 "problem": "size changed", "expected": expected_bytes,
+                                 "actual": actual})  # fmt: skip
+                continue
+            if deep and expected_hash and _sha256(path) != expected_hash:
+                problems.append({"session_id": row["session_id"], "kind": kind, "path": rel,
+                                 "problem": "hash mismatch"})  # fmt: skip
+
+    if not problems:
+        with dbmod.cursor() as conn:
+            conn.execute("UPDATE recording_archives SET verified_at = ?", (dbmod.utcnow(),))
+    return {"checked": checked, "deep": deep, "problems": problems, "ok": not problems}
+
+
+def mark_synced(session_ids: list[int] | None = None, *, target: str) -> dict[str, Any]:
+    """Record that these sessions' files are confirmed present somewhere else.
+
+    Deliberately a separate, explicit step rather than something a sync command sets on
+    its own: "the copy exists off this machine" is the claim that licenses deleting a
+    local file, and it should be made by whatever actually checked, not assumed by
+    whatever launched the transfer.
+    """
+    now = dbmod.utcnow()
+    with dbmod.cursor() as conn:
+        if session_ids:
+            marked = []
+            for sid in session_ids:
+                cur = conn.execute(
+                    "UPDATE recording_archives SET synced_at = ?, sync_target = ? "
+                    "WHERE session_id = ?",
+                    (now, target, sid),
+                )
+                if cur.rowcount:
+                    marked.append(sid)
+        else:
+            conn.execute(
+                "UPDATE recording_archives SET synced_at = ?, sync_target = ?", (now, target)
+            )
+            marked = [
+                r["session_id"] for r in conn.execute("SELECT session_id FROM recording_archives")
+            ]
+    return {"marked": marked, "target": target, "synced_at": now}

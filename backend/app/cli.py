@@ -490,6 +490,98 @@ def cmd_suggest_add(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 
 
+def _mb(n: int | None) -> str:
+    return f"{(n or 0) / 1e6:.1f} MB"
+
+
+def cmd_archive_status(args: argparse.Namespace) -> int:
+    """What is on this machine, what is tracked, and what is confirmed off it."""
+    report = services.archive_status()
+    if args.json:
+        emit(report)
+        return 0
+    t = report["totals"]
+    print(f"{'id':>4}  {'mode':<11} {'size':>9}  {'tracked':<8} {'copy':<9} synced")
+    for e in report["sessions"]:
+        synced = (e["synced_at"] or "")[:10] or "-"
+        size = _mb(e["source_bytes"]) if e["source_present"] else "(gone)"
+        copy = "archive" if e["compressed"] else ("original" if e["source_present"] else "-")
+        tracked = "yes" if e["tracked"] else "NO"
+        print(f"{e['session_id']:>4}  {e['mode']:<11} {size:>9}  {tracked:<8} {copy:<9} {synced}")
+    print(
+        f"\n{t['sessions']} recordings | {_mb(t['source_bytes'])} on disk | "
+        f"{t['untracked']} untracked | {t['unsynced']} not confirmed off this machine"
+    )
+    if t["missing"]:
+        print(f"{t['missing']} recording(s) are gone from disk - run `ect archive verify`.")
+    if t["untracked"]:
+        print(
+            "Run `ect archive track` to hash and record them - that is what makes an\n"
+            "altered or missing file detectable now the audio is not in git."
+        )
+    if t["reclaimable_bytes"]:
+        print(
+            f"{_mb(t['reclaimable_bytes'])} of originals have a compressed archive and "
+            f"could be dropped - only once `synced` is set."
+        )
+    return 0
+
+
+def cmd_archive_track(args: argparse.Namespace) -> int:
+    """Hash the recordings and record them, without transcoding anything."""
+    emit(services.track_recordings(rehash=args.rehash))
+    return 0
+
+
+def cmd_archive_compress(args: argparse.Namespace) -> int:
+    if args.session:
+        emit(
+            services.compress_recording(
+                args.session, bitrate_kbps=args.bitrate, drop_original=args.drop_original
+            )
+        )
+        return 0
+    result = services.compress_pending(
+        bitrate_kbps=args.bitrate, drop_original=args.drop_original, limit=args.limit
+    )
+    emit(result)
+    return 1 if result["failed"] else 0
+
+
+def cmd_archive_manifest(args: argparse.Namespace) -> int:
+    manifest = services.archive_manifest()
+    if args.format == "sha256":
+        # `sha256sum -c` format, deliberately: the check then runs with coreutils on the
+        # far end and needs nothing of this project installed there.
+        root = "data/recordings/"
+        lines = [
+            f"{f['sha256']}  {f['path'][len(root) :] if f['path'].startswith(root) else f['path']}"
+            for f in manifest["files"]
+            if f["sha256"]
+        ]
+        body = "\n".join(lines) + ("\n" if lines else "")
+    else:
+        body = json.dumps(manifest, indent=2, ensure_ascii=False)
+
+    if args.out:
+        Path(args.out).write_text(body, encoding="utf-8")
+        print(f"{manifest['count']} files -> {args.out}")
+        return 0
+    print(body, end="" if args.format == "sha256" else "\n")
+    return 0
+
+
+def cmd_archive_verify(args: argparse.Namespace) -> int:
+    report = services.verify_archives(deep=args.deep)
+    emit(report)
+    return 0 if report["ok"] else 1
+
+
+def cmd_archive_synced(args: argparse.Namespace) -> int:
+    emit(services.mark_synced(args.session or None, target=args.target))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse setup
     parser = argparse.ArgumentParser(
         prog="ect",
@@ -671,6 +763,57 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     p = sug_sub.add_parser("add", help="add suggestions from JSON")
     p.add_argument("--json", required=True)
     p.set_defaults(func=cmd_suggest_add)
+
+    # --- archive -----------------------------------------------------------------
+    arch_p = sub.add_parser("archive", help="recording archive: compress, track, verify")
+    arch_sub = arch_p.add_subparsers(dest="action", required=True)
+
+    p = arch_sub.add_parser("status", help="what is compressed, and what is off this machine")
+    p.add_argument("--json", action="store_true", help="machine-readable instead of a table")
+    p.set_defaults(func=cmd_archive_status)
+
+    p = arch_sub.add_parser("compress", help="transcode recordings to low-bitrate Opus")
+    p.add_argument("--session", type=int, help="one session; default is every uncompressed one")
+    p.add_argument(
+        "--bitrate", type=int, default=24, help="kbps, mono Opus (default 24; 16 is smaller)"
+    )
+    p.add_argument("--limit", type=int, help="stop after this many, for a first run")
+    p.add_argument(
+        "--drop-original",
+        action="store_true",
+        help="delete the source after the archive verifies. Only with a confirmed "
+        "off-machine copy.",
+    )
+    p.set_defaults(func=cmd_archive_compress)
+
+    p = arch_sub.add_parser("track", help="hash and record recordings (no transcoding)")
+    p.add_argument(
+        "--rehash",
+        action="store_true",
+        help="re-read every file instead of trusting an unchanged size",
+    )
+    p.set_defaults(func=cmd_archive_track)
+
+    p = arch_sub.add_parser("manifest", help="the file list + hashes a sync tool should move")
+    p.add_argument("--out", help="write here instead of stdout")
+    p.add_argument(
+        "--format",
+        choices=["json", "sha256"],
+        default="json",
+        help="sha256 emits `sha256sum -c` format, checkable on the server with coreutils",
+    )
+    p.set_defaults(func=cmd_archive_manifest)
+
+    p = arch_sub.add_parser("verify", help="re-check disk against what was recorded")
+    p.add_argument("--deep", action="store_true", help="re-hash, not just size (slow)")
+    p.set_defaults(func=cmd_archive_verify)
+
+    p = arch_sub.add_parser("synced", help="record that a copy is confirmed off this machine")
+    p.add_argument("--session", type=int, nargs="*", help="default is all archived sessions")
+    p.add_argument(
+        "--target", required=True, help="where it was confirmed, e.g. 'homeserver:/srv/ect'"
+    )
+    p.set_defaults(func=cmd_archive_synced)
 
     return parser
 

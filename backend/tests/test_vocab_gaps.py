@@ -146,9 +146,7 @@ class TestCli:
         assert report["dormant"][0]["times_used_correctly"] == 0
         assert report["dormant"][0]["times_seen"] == 2
 
-    def test_brief_drops_sm2_bookkeeping_but_keeps_the_judgement_fields(
-        self, data_dir, capsys
-    ):
+    def test_brief_drops_sm2_bookkeeping_but_keeps_the_judgement_fields(self, data_dir, capsys):
         """`--brief` exists to cut tokens on the /process-session path. It may only drop
         fields the model never reads - `meaning` decides whether a term fitted the
         session and `notes` says how it was missed last time, so both have to survive."""

@@ -130,3 +130,31 @@ CREATE TABLE IF NOT EXISTS worklog_rollups (
   path       TEXT NOT NULL,
   created_at TEXT
 );
+
+-- ADDITIVE: the recording archive (docs/adr/0008-recordings-out-of-git.md).
+--
+-- Recordings are the one artifact that is NOT in the data repo - 129 kbps mono Opus
+-- straight from MediaRecorder, ~1 MB/minute, 100 MB by session 23 - so their location
+-- and integrity are not something `git status` can answer any more. This table is what
+-- answers it instead: what the source was, what the compressed archive is, and whether
+-- the off-machine copy has been verified.
+--
+-- One row per session, written by `ect archive`. Nothing here is required for the app
+-- to work: a missing row means "not archived yet", never an error. The audio itself is
+-- still addressed by sessions.audio_path - this table describes it, it does not replace
+-- it.
+CREATE TABLE IF NOT EXISTS recording_archives (
+  session_id     INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  source_path    TEXT NOT NULL,        -- repo-relative, the original as recorded
+  source_bytes   INTEGER NOT NULL,
+  source_sha256  TEXT NOT NULL,        -- of the original, so a re-encode is never silent
+  source_present INTEGER NOT NULL DEFAULT 1,   -- 0 once the original is deleted locally
+  archive_path   TEXT,                 -- repo-relative, the compressed .opus
+  archive_bytes  INTEGER,
+  archive_sha256 TEXT,
+  bitrate_kbps   INTEGER,
+  compressed_at  TEXT,
+  verified_at    TEXT,                 -- last time hashes were re-checked on disk
+  synced_at      TEXT,                 -- last confirmed copy off this machine
+  sync_target    TEXT
+);
