@@ -406,6 +406,51 @@ re-encode degrades. It is there for when disk pressure changes the trade.
 
 ---
 
+## Remote capture (`ect agent`)
+
+Only relevant once the relay is deployed — with `ECT_RELAY_URL` unset none of this runs
+and nothing else changes. Full setup and troubleshooting: [relay.md](relay.md).
+
+```bash
+uv run ect agent status              # can it reach the relay and the local API?
+uv run ect agent once                # one drain + digest pass, then exit
+uv run ect agent once --no-digest    # drain only
+uv run ect agent once --force-digest # push the snapshot even if unchanged
+uv run ect agent run                 # the loop; what the scheduled task starts at logon
+uv run ect agent run --verbose       # ... with debug logging
+uv run ect agent digest --summary    # sizes and counts, without printing the payload
+uv run ect agent digest              # the whole snapshot, as the relay would serve it
+```
+
+`ect agent once` is the command for "I recorded something on my phone and it never
+turned up". One pass, and it prints what it drained, skipped and failed:
+
+```json
+{
+  "heartbeat": { "ok": true, "inbox_pending": 1 },
+  "drained": [
+    { "uid": "…", "session_id": 42, "mode": "worklog", "status": "recorded",
+      "transcription": { "status": "transcribed", "words": 412 } }
+  ],
+  "skipped": [], "failed": [],
+  "counts": { "drained": 1, "skipped": 0, "failed": 0 },
+  "digest": { "pushed": true, "version": "789db3643ba31086", "sessions": 42 }
+}
+```
+
+Every step is safe to repeat. `sessions.external_uid` — the id the *recorder* minted —
+makes session creation idempotent, re-storing audio is an overwrite, and transcription
+is a no-op once a transcript exists. An ack lost on the wire costs one repeated pass,
+never a duplicate session.
+
+A drained recording stops at `recorded`. The agent never enqueues: you still press
+"Ready for AI processing" and run the skill yourself, exactly as
+[ADR 0003](adr/0003-queue-based-frontend-to-claude-handoff.md) intended. `journal` is
+the free exception — it finalises itself at transcription, so one recorded on the
+commute is complete before you sit down.
+
+---
+
 ## Running the server
 
 ```bash
@@ -416,4 +461,8 @@ cd frontend && npm run dev                                       # http://localh
 Useful endpoints: `GET /api/health`, `GET /api/doctor`, `GET /api/queue`,
 `POST /api/sessions/{id}/transcribe` (transcribe only), `POST /api/sessions/{id}/process`
 (`?transcribe=false` to queue an already-transcribed session without re-running the GPU
-pipeline), `PATCH /api/sessions/{id}/mode`, `GET /api/sessions/{id}/brief`.
+pipeline), `PATCH /api/sessions/{id}/mode`, `GET /api/sessions/{id}/brief`,
+`GET /api/digest` (the offline snapshot `ect agent` mirrors to the relay).
+
+`./dev.ps1` binds loopback unless `ECT_HOST` says otherwise — see
+[relay.md](relay.md) before moving it, because the API is unauthenticated.

@@ -36,6 +36,14 @@ It passes `ECT_API_PORT` to Vite, so `-Port` moves both halves together.
 Frontend (`frontend/`): `npm run typecheck` (strict, `noUnusedLocals`), `npm run build`
 (runs `tsc -b` then Vite). There is no frontend test suite.
 
+```bash
+# remote capture (ADR 0006) - only if the relay is deployed
+uv run ect agent status              # can it reach the relay and the local API?
+uv run ect agent once                # one drain + digest pass; what to run when a
+                                     # phone recording "did not arrive"
+cd ../relay && go test ./...         # the relay's own suite: no cluster, no GPU
+```
+
 `ect doctor` first when anything GPU-shaped misbehaves — it reports `vram_free_gb` and
 the registered DLL directories, which is usually the whole answer.
 
@@ -88,6 +96,24 @@ dump rewards performing over reporting (PRD-worklog 5.1), so each has its own wr
 (`record_worklog_entry` / `record_brainstorm_entry`) that skips `insert_score` entirely
 rather than inserting a meaningless row. `journal` never reaches any write path — see
 below.
+
+**4. Remote capture goes through the relay's inbox, never straight into the DB.**
+`ect agent` (`app/agent.py`) drains recordings captured on a phone by driving the
+**local HTTP API** - `POST /api/sessions`, `/recording`, `/transcribe` - and never
+imports `services`. That is a correctness requirement, not layering taste:
+`services._gpu_lock` is a `threading.Lock`, so it only guards one process, and two
+processes each loading `large-v3` do not fit in 6 GB and take the worker down natively.
+Driving the API keeps every WhisperX load inside the one uvicorn process where the lock
+means something. The agent needs no torch, no CUDA and no `pipeline` import at all.
+
+`sessions.external_uid` is what makes that safe to repeat: the *recorder* mints the id,
+so a retried upload and a re-drained item both collapse into the same session
+(`create_session` returns the existing row). A drained recording stops at `recorded` -
+ADR 0003 stands, and arriving over the network does not change it. `journal` is the free
+exception, because it finalises itself at transcription.
+
+The whole thing is optional: with `ECT_RELAY_URL` unset, nothing above runs and the app
+is exactly what it was. See `docs/relay.md` and `docs/adr/0006-…`.
 
 ### Two independent audio layers
 
@@ -188,6 +214,16 @@ must never reach Claude, by design.
   explicit `ALTER TABLE`. Columns beyond PRD §7.2 are marked `ADDITIVE`.
 - **Skills live in `.claude/skills/<name>/SKILL.md`**, not `skills/` as the PRD sketches.
   Claude Code only discovers them there.
+- **The digest is derived, one-way, and never written by the relay** (`app/digest.py`).
+  It is what the relay serves while the PC is off. Keeping it read-only is what keeps
+  `services.write_notes`'s version/409 contract a local concern instead of a distributed
+  one. It carries no audio, no transcripts and no per-word timings by construction - if
+  you add something the offline UI needs, add it to `build_digest` *and* to the relay's
+  route table in `relay/digest.go`, or the relay will 503 a route that now has data.
+- **`services.decorate_session` is shared by the API and the digest builder** on
+  purpose: the relay serves those rows verbatim, so a `has_*` flag computed differently
+  in the two places shows up as the UI disagreeing with itself depending on which side
+  answered.
 - **Frontend colors come from CSS custom properties** in `src/styles.css` (a
   CVD-validated palette with separately chosen light and dark steps). Components
   reference `var(--series-1)` etc. — do not hard-code hex in a component.
@@ -214,4 +250,6 @@ It touches six places, and missing one produces a silently wrong `overall`:
 - `docs/commands.md` — every skill and `ect` command, with payload shapes
 - `docs/rubric.md` — scoring anchors; read before scoring anything
 - `docs/setup.md` — prerequisites, VRAM ladder, config env vars, troubleshooting
+- `docs/relay.md` — remote capture: the relay, `ect agent`, and how to run both
+- `relay/README.md` — the Go switchboard itself; manifests live in the `k8s-config` repo
 - `docs/adr/` — the load-bearing decisions and the alternatives rejected
