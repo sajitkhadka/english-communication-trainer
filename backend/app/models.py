@@ -16,6 +16,9 @@ class SessionCreate(BaseModel):
     category: str | None = None
     target_words: list[str] = Field(default_factory=list)
     notes: str | None = None
+    # Set only by `ect agent` when draining a capture from the relay inbox (ADR 0006).
+    # Re-posting the same uid returns the existing session instead of a duplicate.
+    external_uid: str | None = None
 
     @field_validator("topic", "category", "notes")
     @classmethod
@@ -44,6 +47,7 @@ class SessionOut(BaseModel):
     notes: str | None = None
     title: str | None = None
     summary: str | None = None
+    external_uid: str | None = None
     score: dict[str, Any] | None = None
     has_audio: bool = False
     has_transcript: bool = False

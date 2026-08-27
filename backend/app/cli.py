@@ -486,6 +486,79 @@ def cmd_suggest_add(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# agent (ADR 0006)
+# --------------------------------------------------------------------------- #
+
+
+def _agent_or_exit() -> Any:
+    from .agent import Agent, AgentError
+
+    try:
+        return Agent()
+    except AgentError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+
+def cmd_agent_run(args: argparse.Namespace) -> int:
+    import logging
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+    )
+    with _agent_or_exit() as agent:
+        try:
+            agent.run_forever()
+        except KeyboardInterrupt:
+            print("agent stopped", file=sys.stderr)
+    return 0
+
+
+def cmd_agent_once(args: argparse.Namespace) -> int:
+    """A single pass. What to run when remote capture 'did not arrive'."""
+    with _agent_or_exit() as agent:
+        report: dict[str, Any] = {"heartbeat": agent.heartbeat()}
+        report.update(agent.drain().as_dict())
+        if not args.no_digest:
+            report["digest"] = agent.push_digest(force=args.force_digest)
+    emit(report)
+    return 0
+
+
+def cmd_agent_status(args: argparse.Namespace) -> int:
+    from .agent import status
+
+    report = status()
+    emit(report)
+    return 0 if report.get("ok") else 1
+
+
+def cmd_agent_digest(args: argparse.Namespace) -> int:
+    """Print the snapshot itself - what the relay would serve while the PC is off."""
+    from .digest import build_digest
+
+    payload = build_digest(feedback_horizon=args.horizon)
+    if args.summary:
+        emit(
+            {
+                "version": payload["version"],
+                "generated_at": payload["generated_at"],
+                "feedback_horizon": payload["feedback_horizon"],
+                "sessions": len(payload["sessions"]),
+                "with_feedback": sum(
+                    1 for d in payload["session_details"].values() if d.get("feedback_markdown")
+                ),
+                "words": len(payload["words"]),
+                "bytes": len(json.dumps(payload, default=str)),
+            }
+        )
+    else:
+        emit(payload)
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # parser
 # --------------------------------------------------------------------------- #
 
@@ -820,6 +893,32 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
         "--target", required=True, help="where it was confirmed, e.g. 'homeserver:/srv/ect'"
     )
     p.set_defaults(func=cmd_archive_synced)
+
+    # agent (ADR 0006) - remote capture drain, heartbeat, digest push
+    ag_p = sub.add_parser("agent", help="drain the relay inbox and mirror the digest")
+    ag_sub = ag_p.add_subparsers(dest="action", required=True)
+
+    p = ag_sub.add_parser("run", help="the loop; what the scheduled task starts at logon")
+    p.add_argument("--verbose", action="store_true", help="debug logging")
+    p.set_defaults(func=cmd_agent_run)
+
+    p = ag_sub.add_parser("once", help="a single drain + digest pass, then exit")
+    p.add_argument("--no-digest", action="store_true", help="drain only")
+    p.add_argument(
+        "--force-digest",
+        action="store_true",
+        help="push the snapshot even if its version has not changed",
+    )
+    p.set_defaults(func=cmd_agent_once)
+
+    ag_sub.add_parser(
+        "status", help="can the agent reach the relay and the local API?"
+    ).set_defaults(func=cmd_agent_status)
+
+    p = ag_sub.add_parser("digest", help="build the offline snapshot and print it")
+    p.add_argument("--summary", action="store_true", help="sizes and counts, not the payload")
+    p.add_argument("--horizon", type=int, help="override digest_feedback_horizon")
+    p.set_defaults(func=cmd_agent_digest)
 
     return parser
 

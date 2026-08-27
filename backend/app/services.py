@@ -12,6 +12,7 @@ import json
 import logging
 import re
 import shutil
+import sqlite3
 import threading
 from pathlib import Path
 from typing import Any
@@ -59,6 +60,7 @@ def create_session(
     target_words: list[str] | None = None,
     notes: str | None = None,
     write_prompt: bool = True,
+    external_uid: str | None = None,
 ) -> dict[str, Any]:
     if mode not in ("recommended", "freeform", "interview", "worklog", "brainstorm", "journal"):
         raise WorkflowError(f"unknown mode {mode!r}")
@@ -68,19 +70,43 @@ def create_session(
         # Plain hyphen: the topic round-trips through Windows consoles via the CLI.
         topic = f"{mode.title()} - {dbmod.today()}"
     ensure_tree()
-    with dbmod.cursor() as conn:
-        session_id = dbmod.create_session(
-            conn,
-            mode=mode,
-            topic=topic,
-            category=category,
-            target_words=target_words or [],
-            notes=notes,
-        )
-        # Register target words so they exist in the corpus before review scheduling.
-        for term in target_words or []:
-            dbmod.add_word(conn, term=term, source="recommended")
-        session = dbmod.get_session(conn, session_id)
+    if external_uid:
+        # A capture that arrived over the network (ADR 0006). Both hops in front of
+        # this call retry, so "create" has to mean "create once": hand back the
+        # session this uid already made rather than a second copy of the same
+        # recording. Returning early also protects whatever state that session has
+        # since reached - a re-drain must never reset a `processed` session to
+        # `awaiting_recording`.
+        with dbmod.cursor() as conn:
+            existing = dbmod.get_session_by_external_uid(conn, external_uid)
+        if existing is not None:
+            return existing
+    try:
+        with dbmod.cursor() as conn:
+            session_id = dbmod.create_session(
+                conn,
+                mode=mode,
+                topic=topic,
+                category=category,
+                target_words=target_words or [],
+                notes=notes,
+                external_uid=external_uid,
+            )
+            # Register target words so they exist in the corpus before review scheduling.
+            for term in target_words or []:
+                dbmod.add_word(conn, term=term, source="recommended")
+            session = dbmod.get_session(conn, session_id)
+    except sqlite3.IntegrityError:
+        # The check above lost a race with a concurrent drain of the same uid. The
+        # unique index is the real guard; this just turns its exception back into the
+        # idempotent answer the caller asked for.
+        if not external_uid:
+            raise
+        with dbmod.cursor() as conn:
+            session = dbmod.get_session_by_external_uid(conn, external_uid)
+        if session is None:  # pragma: no cover - only reachable if the index vanished
+            raise
+        return session
     if session is None:  # pragma: no cover - the row was written in this transaction
         raise WorkflowError(f"session {session_id} vanished immediately after creation")
     if write_prompt:
@@ -116,6 +142,35 @@ def write_prompt_file(session: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
+
+
+def feedback_file(session: dict[str, Any]) -> Path:
+    """Where this session's markdown output lives.
+
+    The stored path wins: a worklog session links its daily journal entry under
+    `data/worklog/`, not the canonical `data/feedback/<id>.md`.
+    """
+    stored = abspath(session.get("feedback_path"))
+    if stored and stored.is_file():
+        return stored
+    return feedback_path(session["id"])
+
+
+def decorate_session(session: dict[str, Any], conn) -> dict[str, Any]:
+    """Add the derived `has_*` flags and the latest score, in place.
+
+    Lives here rather than in the sessions router because the digest builder needs
+    exactly the same shape - the relay serves these rows verbatim when the PC is
+    offline, so a flag computed differently in the two places would show up as the
+    UI disagreeing with itself depending on which side answered (ADR 0006).
+    """
+    sid = session["id"]
+    audio = abspath(session.get("audio_path")) or find_recording(sid, session["mode"])
+    session["has_audio"] = bool(audio and Path(audio).is_file())
+    session["has_transcript"] = transcript_path(sid).is_file()
+    session["has_feedback"] = feedback_file(session).is_file()
+    session["score"] = dbmod.get_score(conn, sid)
+    return session
 
 
 SWITCHABLE_MODES = ("freeform", "worklog", "brainstorm", "journal")

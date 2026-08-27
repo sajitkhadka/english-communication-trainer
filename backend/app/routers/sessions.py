@@ -33,23 +33,10 @@ SUFFIX_BY_TYPE = {
 }
 
 
-def _feedback_file(session: dict[str, Any]) -> Path:
-    """The stored path wins: worklog sessions link their daily journal entry, which
-    lives under data/worklog/, not at the canonical data/feedback/<id>.md."""
-    stored = abspath(session.get("feedback_path"))
-    if stored and stored.is_file():
-        return stored
-    return feedback_path(session["id"])
-
-
-def _decorate(session: dict[str, Any], conn) -> dict[str, Any]:
-    sid = session["id"]
-    audio = abspath(session.get("audio_path")) or find_recording(sid, session["mode"])
-    session["has_audio"] = bool(audio and Path(audio).is_file())
-    session["has_transcript"] = transcript_path(sid).is_file()
-    session["has_feedback"] = _feedback_file(session).is_file()
-    session["score"] = dbmod.get_score(conn, sid)
-    return session
+# Both live in `services` so the digest builder produces byte-identical rows - see
+# the note on `services.decorate_session`.
+_feedback_file = services.feedback_file
+_decorate = services.decorate_session
 
 
 @router.post("", response_model=SessionOut, status_code=201)
@@ -61,6 +48,7 @@ def create_session(body: SessionCreate) -> Any:
             category=body.category,
             target_words=body.target_words,
             notes=body.notes,
+            external_uid=body.external_uid,
         )
     except services.WorkflowError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

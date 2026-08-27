@@ -50,11 +50,23 @@ CREATE TABLE IF NOT EXISTS sessions (
   -- session is processed (or, for `journal`, never - there is no processing). Doubles
   -- as the UI's compact label and the human-readable part of the output filename.
   title             TEXT,
-  summary           TEXT
+  summary           TEXT,
+  -- ADDITIVE (docs/adr/0006-remote-capture-local-processing.md): the id the *recorder*
+  -- minted for this capture, before any session existed. A recording made on a phone
+  -- reaches this database over the network via the relay inbox, and both hops retry:
+  -- the phone re-uploads a blob whose POST timed out, and `ect agent` re-drains an
+  -- item whose ack was lost. This column is what makes both retries idempotent -
+  -- `services.create_session` returns the existing row instead of a duplicate session.
+  -- NULL for every session created the ordinary way, at the desk.
+  external_uid      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_mode   ON sessions(mode);
+-- A unique *index* rather than a UNIQUE column: SQLite's ALTER TABLE cannot add a
+-- UNIQUE column, so this is the only form that is identical on a fresh database and
+-- on one migrated by db._migrate. Multiple NULLs are allowed, which is the point.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_external_uid ON sessions(external_uid);
 
 CREATE TABLE IF NOT EXISTS scores (
   id             INTEGER PRIMARY KEY,

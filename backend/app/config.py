@@ -43,9 +43,32 @@ class Settings(BaseSettings):
     transcribe_on_upload: bool = True  # run the GPU pipeline as soon as audio lands
 
     # --- server ---
+    # Loopback by default, and deliberately so: `PUT /api/notes` and
+    # `DELETE /api/sessions/{id}` are unauthenticated. ADR 0006 moves this to the PC's
+    # LAN address so the relay can reach it, and pairs that with a firewall rule scoped
+    # to the relay host - the rule is load-bearing, not hygiene. See docs/relay.md.
     host: str = "127.0.0.1"
     port: int = 8000
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+    # --- relay / agent (ADR 0006) ---
+    # Empty `relay_url` disables the agent entirely: `ect agent run` refuses to start
+    # rather than looping against nothing, and nothing else in the app changes.
+    relay_url: str = ""
+    relay_token: str = ""
+    # What the agent calls to drive the workflow. Deliberately the HTTP API and not
+    # `services`: every WhisperX load has to happen inside the one server process, or
+    # `services._gpu_lock` (a threading.Lock, so process-wide only) stops guarding
+    # anything and two concurrent large-v3 loads take the worker down natively.
+    local_api_url: str = "http://127.0.0.1:8000"
+    agent_poll_sec: float = 20.0  # inbox drain + heartbeat
+    agent_digest_sec: float = 120.0  # digest rebuild; pushed only when its hash moves
+    agent_http_timeout_sec: float = 30.0
+    # Transcription is minutes of GPU work behind a synchronous request.
+    agent_transcribe_timeout_sec: float = 1800.0
+    # How many of the most recent sessions carry full feedback markdown in the digest.
+    # Beyond it, metadata only - the snapshot is for reading history, not replaying it.
+    digest_feedback_horizon: int = 50
 
     @property
     def db_path(self) -> Path:
