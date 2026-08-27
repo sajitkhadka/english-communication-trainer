@@ -38,6 +38,13 @@ frontend/dist/
 frontend/.vite/
 *.tsbuildinfo
 
+# --- relay (Go) ---
+# Its local run dir: inbox.db plus the audio blobs of captures not yet drained.
+# Same reasoning as data/ - recordings, and nothing git should ever see.
+relay/data/
+relay/relay
+relay/relay.exe
+
 # --- env / local ---
 .env
 .env.local
