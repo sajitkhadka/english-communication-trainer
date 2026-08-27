@@ -1,10 +1,14 @@
 import type {
   Health,
+  InboxItem,
+  InboxUploadResult,
   Mode,
   Notes,
   ProcessResponse,
   ProgressPayload,
   QueuePayload,
+  RelayStatus,
+  RemoteMode,
   Session,
   SessionDetail,
   Suggestion,
@@ -123,6 +127,37 @@ export const api = {
   progress: () => request<ProgressPayload>("/progress"),
 
   suggestions: () => request<Suggestion[]>("/suggestions"),
+
+  // --- the relay (ADR 0006) ---
+
+  // Only the relay answers this; the PC's API has no such route and 404s, which is how
+  // the app knows which side is serving it without a second build or a build-time flag.
+  relayStatus: () => request<RelayStatus>("/relay/status"),
+
+  // Send a capture straight to the relay's inbox. Deliberately not a session: with the
+  // PC asleep there is nothing to create one against, and one SQLite file stays the
+  // source of truth. `ect agent` turns this into a session later, using `uid` as
+  // `external_uid` so a retried upload and a repeated drain collapse into one session.
+  // Field order matters - the relay streams the file part straight to disk, so the
+  // fields describing it have to be appended first.
+  uploadToInbox: (body: {
+    uid: string;
+    mode: RemoteMode;
+    topic?: string | null;
+    notes?: string | null;
+    blob: Blob;
+    filename: string;
+  }) => {
+    const form = new FormData();
+    form.append("uid", body.uid);
+    form.append("mode", body.mode);
+    if (body.topic) form.append("topic", body.topic);
+    if (body.notes) form.append("notes", body.notes);
+    form.append("file", body.blob, body.filename);
+    return request<InboxUploadResult>("/inbox", { method: "POST", body: form });
+  },
+
+  inboxRecent: () => request<{ items: InboxItem[] }>("/inbox/recent"),
   requestSuggestions: (body: { mode: Mode; category?: string | null }) =>
     request<{ id: number; status: string; hint: string }>("/suggestions/requests", {
       method: "POST",

@@ -1,9 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "../api";
+import type { RemoteMode } from "../types";
 import { formatClock } from "./common";
 
 type Phase = "idle" | "recording" | "paused" | "review" | "uploading";
+
+/** Where a finished recording goes.
+ *
+ *  `session` is the desk path, unchanged: the session already exists and the audio is
+ *  attached to it. `inbox` is the relay path (ADR 0006) - there is no session yet,
+ *  because with the PC asleep there is nothing to create one against, so the capture
+ *  goes to the server's inbox and `ect agent` turns it into a session later. */
+export type RecorderTarget =
+  | { kind: "session"; sessionId: number }
+  | { kind: "inbox"; mode: RemoteMode; topic?: string | null };
+
+/** A client-minted id that travels with the capture all the way to
+ *  `sessions.external_uid`. It is what makes a retried upload an overwrite rather than
+ *  a second copy, and a repeated drain a no-op rather than a duplicate session. */
+function newUid(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  // Older WebViews: unique enough for an inbox key, and the relay only requires the
+  // characters to be filename-safe.
+  return `cap-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 /** Pick a container the browser can actually produce. ffmpeg decodes all of these
  *  backend-side, so we just take the first supported one. */
@@ -19,11 +40,11 @@ function pickMimeType(): string | undefined {
 }
 
 export default function Recorder({
-  sessionId,
+  target,
   onUploaded,
 }: {
-  sessionId: number;
-  onUploaded: () => void;
+  target: RecorderTarget;
+  onUploaded: (result?: { uid: string; hint: string }) => void;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [elapsed, setElapsed] = useState(0);
@@ -158,9 +179,22 @@ export default function Recorder({
         : blob.type.includes("ogg")
           ? "ogg"
           : "webm";
-      await api.uploadRecording(sessionId, blob, `${sessionId}.${extension}`);
-      discard();
-      onUploaded();
+      if (target.kind === "session") {
+        await api.uploadRecording(target.sessionId, blob, `${target.sessionId}.${extension}`);
+        discard();
+        onUploaded();
+      } else {
+        const uid = newUid();
+        const result = await api.uploadToInbox({
+          uid,
+          mode: target.mode,
+          topic: target.topic ?? null,
+          blob,
+          filename: `${uid}.${extension}`,
+        });
+        discard();
+        onUploaded({ uid: result.uid, hint: result.hint });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
       setPhase("review");
@@ -213,7 +247,11 @@ export default function Recorder({
           <audio src={previewUrl} controls style={{ width: "100%" }} />
           <div className="btn-row" style={{ marginTop: "0.75rem" }}>
             <button className="primary" onClick={upload} disabled={phase === "uploading"}>
-              {phase === "uploading" ? "Uploading…" : "Save recording"}
+              {phase === "uploading"
+                ? "Uploading…"
+                : target.kind === "inbox"
+                  ? "Send to my PC"
+                  : "Save recording"}
             </button>
             <button onClick={discard} disabled={phase === "uploading"}>
               Record again
