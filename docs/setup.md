@@ -108,6 +108,10 @@ or a `backend/.env` file. The ones worth knowing:
 | `ECT_TRANSCRIBE_ON_UPLOAD` | `true` | run the GPU pipeline when Process is pressed, so the skill never waits on it |
 | `ECT_ALIGN` | `true` | `false` skips forced alignment (faster, coarser timings) |
 
+`ECT_HOST` and the `ECT_RELAY_*` / `ECT_AGENT_*` family belong to remote capture and
+are tabled in `docs/relay.md` instead. With `ECT_RELAY_URL` unset none of them do
+anything, and the app is exactly what it was before ADR 0006.
+
 Tuning note: the two hesitation thresholds are the knobs that matter. If genuine pauses
 are being reported as vocalized fillers, raise `ECT_MIN_HESITATION_SEC`. If obvious
 "um"s are being missed, raise `ECT_HESITATION_MAX_WORD_COVERAGE` toward `0.6`.

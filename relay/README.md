@@ -86,6 +86,23 @@ The tests cover the whole switchboard against a real `httptest` PC: the drain cy
 retried uploads, offline fallback, the three ways the PC can be considered down, and
 the auth boundary. No relay, cluster or GPU needed.
 
+## How it ships
+
+A `relay-v*.*.*` tag on this repo runs `.github/workflows/deploy.yml`: it builds the
+image on the `sserver-ect` self-hosted runner, pushes it to the LAN registry, and
+commits the new tag into the `k8s-config` repo. Argo CD is on manual sync, so the tag
+stages a release rather than shipping one.
+
+Build from the **repo root**, not `relay/` — the same Dockerfile builds the frontend, so
+the relay always serves the UI that this commit produces:
+
+```sh
+docker build -f relay/Dockerfile -t 192.168.0.120:5000/ect-relay:dev .
+```
+
+Full runbook, including the three per-repo prerequisites and what happens when the
+sealed token and `backend/.env` disagree: `docs/relay.md`, "Shipping a new relay".
+
 ## Two things worth knowing before changing it
 
 **The blob is deleted on ack, and that is the design.** A `worklog` recording is full

@@ -122,6 +122,7 @@ frontend/         React + TypeScript (Vite)
 relay/            Go: the remote-capture switchboard (ADR 0006). Deploys to the home
                   server; its k8s manifests live in the k8s-config repo.
 .claude/skills/   generate-topic, process-session, vocab-review, log-work, process-brainstorm
+.github/          workflows: ci.yml on every push, deploy.yml on a relay-v* tag
 data/             recordings, transcripts, feedback, prompts, worklog, brainstorm,
                   profile.md, learning-notes.md, app.db                 (gitignored)
 docs/             rubric, commands, setup, profile.example.md, learning-notes.example.md, adr/

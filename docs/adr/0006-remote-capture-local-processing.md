@@ -233,7 +233,7 @@ broken on the commute. With the PC awake the round trip is a few seconds.
 The rollout's third phase delivered the digest but not a working Wake-on-LAN, for the
 physical reason recorded above.
 
-Two things the design did not anticipate, both found by running it rather than reading
+Three things the design did not anticipate, all found by running it rather than reading
 it:
 
 **Basic auth and the agent's bearer token cannot share a host root.** A request carries
@@ -251,3 +251,22 @@ Binding only the LAN address breaks the first two and invites a second server on
 loopback, which is precisely the double `large-v3` load `_gpu_lock` cannot prevent:
 it is a `threading.Lock`, so it guards one process. During bring-up this briefly left
 two API processes running at once.
+
+**A `Secret` template in the Argo CD app directory is a live `Secret`.** The manifests
+ship the two credentials as SealedSecrets, with `ect-relay-secret.example.yaml`
+alongside them to document the sealing commands. That file is a template, but it is
+also a syntactically valid `Secret`, and Argo CD applies every valid manifest under the
+app path - so it overwrote the sealed-secrets controller's output with the literal
+string `${ECT_RELAY_TOKEN}`.
+
+What made it hard to see is the same property that makes the agent's design work: a
+running pod never rereads its environment. The relay held the correct token from the
+hand-created Secret it started with and kept working for hours. The fault surfaced only
+when the first CI-built image replaced the pod, as `ect agent` returning 401 with
+nothing on the PC changed to explain it. The Application now sets
+`directory.exclude: '*.example.yaml'`.
+
+This is worth recording in an ADR rather than only a runbook because it is a
+consequence of the split itself. The credential has two homes - `backend/.env` on the
+PC and a SealedSecret in a GitOps repo - and nothing checks that they still agree. The
+401 is the only signal, and it arrives at pod-restart time rather than at deploy time.
