@@ -47,6 +47,15 @@ cd ../relay && go test ./...         # the relay's own suite: no cluster, no GPU
 `ect doctor` first when anything GPU-shaped misbehaves — it reports `vram_free_gb` and
 the registered DLL directories, which is usually the whole answer.
 
+**CI runs the backend suite with no torch and no whisperx installed.** `.github/workflows/ci.yml`
+installs the non-GPU dependencies explicitly rather than `uv sync`, which is what keeps
+it at ~15s instead of a multi-GB CUDA download. That only works because `pipeline`
+imports are local to the functions that need them — a module-level `import torch`
+anywhere reachable from `app` breaks CI while passing locally. Only `relay/` is built
+into an image; the backend and frontend run on the PC from a checkout, so a
+`relay-v*.*.*` tag is the only thing that deploys (`docs/relay.md`, "Shipping a new
+relay").
+
 ## The architecture in one idea
 
 **The backend does everything deterministic; Claude does judgement only.** This is not a
@@ -260,3 +269,4 @@ It touches six places, and missing one produces a silently wrong `overall`:
 - `docs/relay.md` — remote capture: the relay, `ect agent`, and how to run both
 - `relay/README.md` — the Go switchboard itself; manifests live in the `k8s-config` repo
 - `docs/adr/` — the load-bearing decisions and the alternatives rejected
+- `.github/workflows/` — `ci.yml` on every push, `deploy.yml` on a `relay-v*.*.*` tag

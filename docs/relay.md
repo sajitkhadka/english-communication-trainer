@@ -250,7 +250,7 @@ All `ECT_`-prefixed, all in `backend/.env` (see `app/config.py`):
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `ECT_HOST` | `127.0.0.1` | what the API binds to. The LAN address enables the relay. |
+| `ECT_HOST` | `127.0.0.1` | what the API binds to. Set it to `0.0.0.0` for the relay - **not** the LAN address, which breaks loopback and invites a second uvicorn. |
 | `ECT_RELAY_URL` | *(empty)* | the relay. Empty disables the agent entirely. |
 | `ECT_RELAY_TOKEN` | *(empty)* | must match the relay's `ECT_RELAY_TOKEN`. |
 | `ECT_LOCAL_API_URL` | `http://127.0.0.1:8000` | what the agent drives. |
