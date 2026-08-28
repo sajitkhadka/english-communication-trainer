@@ -67,13 +67,13 @@ class FakeRelay:
             self.unauthorised.append(path)
             return httpx.Response(401, json={"detail": "agent token required"})
 
-        if path == "/api/inbox/pending":
+        if path == "/agent/inbox/pending":
             pending = [i for i in self.items if i["uid"] not in {u for u, _ in self.acked}]
             return httpx.Response(200, json={"items": pending, "count": len(pending)})
-        if path == "/api/agent/heartbeat":
+        if path == "/agent/heartbeat":
             self.heartbeats.append(json.loads(request.content or b"{}"))
             return httpx.Response(200, json={"ok": True})
-        if path == "/api/digest" and request.method == "PUT":
+        if path == "/agent/digest" and request.method == "PUT":
             self.digests.append(json.loads(request.content))
             return httpx.Response(200, json={"stored": True})
         if path.endswith("/blob"):

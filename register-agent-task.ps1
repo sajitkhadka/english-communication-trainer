@@ -94,28 +94,72 @@ if ($probe.relay -isnot [pscustomobject]) {
                    "Registering anyway - the agent retries forever, which is the point.")
 }
 
-# cmd /c with a redirect, because ScheduledTask actions have nowhere to send stdout and
-# the log is the only way to see what the drain loop is doing.
-$command = "uv run python -m app.cli agent run >> `"$logPath`" 2>&1"
-$action = New-ScheduledTaskAction -Execute "cmd.exe" `
-    -Argument "/c $command" -WorkingDirectory $backend
+# Registered from XML rather than through New-ScheduledTask*, after the cmdlet path
+# failed three different ways. The cmdlets emit a Principal with no `id`, and
+# `<Actions Context="Author">` has nothing to bind to, so the service rejects the whole
+# task with "The parameter is incorrect" pointing at the </Principal> line - which says
+# nothing about the actual cause. `Export-ScheduledTask` on any working task shows the
+# shape below: id="Author", a SID for the principal, DOMAIN\user for the trigger.
+#
+# cmd /c with a redirect, because a ScheduledTask action has nowhere to send stdout and
+# the log is the only way to see what the drain loop is doing. The redirect characters
+# are XML-escaped here, not shell-escaped.
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$taskArgs = "/c uv run python -m app.cli agent run &gt;&gt; &quot;$logPath&quot; 2&gt;&amp;1"
 
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$xml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Drains the ECT relay inbox and mirrors the offline digest (ADR 0006).</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>$env:USERDOMAIN\$env:USERNAME</UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>$sid</UserId>
+      <LogonType>InteractiveToken</LogonType>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>cmd.exe</Command>
+      <Arguments>$taskArgs</Arguments>
+      <WorkingDirectory>$backend</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"@
 
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
-    -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -RestartInterval (New-TimeSpan -Minutes 1) -RestartCount 3
-# The loop is meant to run forever; a time limit would kill it mid-drain.
+Register-ScheduledTask -TaskName $TaskName -Xml $xml -Force | Out-Null
 
-$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" `
-    -LogonType Interactive -RunLevel Limited
-
-if (Get-Task) { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false }
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-    -Settings $settings -Principal $principal `
-    -Description "Drains the ECT relay inbox and mirrors the offline digest (ADR 0006)." | Out-Null
+# Verify rather than trust. Register-ScheduledTask surfaces some failures as
+# non-terminating errors that slip past $ErrorActionPreference, so without this check
+# the script cheerfully reports success for a task that does not exist - which is
+# exactly what it did while the principal was wrong.
+if (-not (Get-Task)) {
+    throw "registration reported no error but '$TaskName' does not exist. See above."
+}
 
 Write-Host "registered '$TaskName'" -ForegroundColor Green
 Write-Host "  relay : $($probe.relay_url)"

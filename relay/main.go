@@ -110,13 +110,34 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/inbox", s.handleUpload)
 	mux.HandleFunc("GET /api/inbox/recent", s.handleRecent)
 
-	// --- the agent's endpoints (bearer token) ---
-	mux.Handle("POST /api/agent/heartbeat", s.authed(s.handleHeartbeat))
-	mux.Handle("GET /api/inbox/pending", s.authed(s.handlePending))
-	mux.Handle("GET /api/inbox/{uid}/blob", s.authed(s.handleBlob))
-	mux.Handle("POST /api/inbox/{uid}/ack", s.authed(s.handleAck))
-	mux.Handle("POST /api/inbox/{uid}/fail", s.authed(s.handleFail))
-	mux.Handle("PUT /api/digest", s.authed(s.handleDigestPush))
+	// --- the agent's endpoints, all under /agent/ (bearer token) ---
+	//
+	// The shared prefix is not cosmetic. Browser traffic is guarded by an
+	// ingress-nginx basic-auth annotation, and basic auth would reject the agent's
+	// `Authorization: Bearer` header outright - a request carries one Authorization
+	// header, not two. So the agent's routes need to be exempt from that annotation,
+	// and an exemption is only safe if it is expressible as one unambiguous path.
+	//
+	// Splitting by path under /api/ was tried and is not: `/api/inbox/` would also
+	// match the browser's own `POST /api/inbox` and `GET /api/inbox/recent`, and
+	// exempting `/api/digest` for the agent's PUT would expose the snapshot to
+	// `GET /api/digest` as well. One prefix makes the boundary legible in the route
+	// table, in the Ingress, and to anyone reading either.
+	// The same view the browser gets at /api/relay/status, but reached with the bearer
+	// token: `ect agent status` cannot use the /api/ route, because basic auth would
+	// reject its Authorization header before the relay ever saw it.
+	mux.Handle("GET /agent/status", s.authed(s.handleRelayStatus))
+	mux.Handle("POST /agent/heartbeat", s.authed(s.handleHeartbeat))
+	mux.Handle("GET /agent/inbox/pending", s.authed(s.handlePending))
+	mux.Handle("GET /agent/inbox/{uid}/blob", s.authed(s.handleBlob))
+	mux.Handle("POST /agent/inbox/{uid}/ack", s.authed(s.handleAck))
+	mux.Handle("POST /agent/inbox/{uid}/fail", s.authed(s.handleFail))
+	mux.Handle("PUT /agent/digest", s.authed(s.handleDigestPush))
+	// Anything else under /agent/ is token-guarded too, so a typo cannot fall through
+	// to the switchboard and reach the PC unauthenticated.
+	mux.Handle("/agent/", s.authed(func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError(w, http.StatusNotFound, "no such agent route")
+	}))
 
 	// --- everything else under /api: the switchboard ---
 	mux.Handle("/api/", s.board)

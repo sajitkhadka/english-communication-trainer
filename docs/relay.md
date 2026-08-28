@@ -45,13 +45,27 @@ thing, before anything is built on top of them.
 ./enable-lan-access.ps1 -RelayHost 192.168.0.120           # elevated shell
 ```
 
-Then put the address it printed in `backend/.env`:
+Then in `backend/.env`:
 
 ```ini
-ECT_HOST=192.168.0.164
+ECT_HOST=0.0.0.0
 ```
 
-and restart the API (`./dev.ps1` passes `--host` from it). From the server:
+**`0.0.0.0`, not the LAN address.** One uvicorn has to serve both interfaces: the Vite
+proxy and `ect agent` reach the API on `127.0.0.1`, the relay reaches it on the LAN
+address. Binding only the LAN address breaks the first two — and invites a second
+uvicorn onto loopback to fix them, which is the one failure mode `_gpu_lock` cannot
+catch. It is a `threading.Lock`, so it guards one process; two processes each loading
+`large-v3` do not fit in 6 GB and take the worker down natively, with no exception to
+record. (This was not hypothetical during bring-up: binding to the LAN address left two
+servers running at once.)
+
+`./dev.ps1` asks pydantic-settings for the value rather than reading `.env` itself, so
+env var, `.env` and default keep their normal precedence. It also refuses to start when
+the port is already served, which is the guard against exactly the above — do not start
+uvicorn by hand alongside it.
+
+Restart the API, then from the server:
 
 ```sh
 curl http://192.168.0.164:8000/api/health
@@ -97,7 +111,7 @@ docker build -f relay/Dockerfile -t 192.168.0.120:5000/ect-relay:latest .
 docker push 192.168.0.120:5000/ect-relay:latest
 ```
 
-Then seal the two Secrets, point `ect.sajitkhadka.com` at the cluster, and sync in
+Then seal the two Secrets, point `ect.int.sajitkhadka.com` at the cluster, and sync in
 Argo CD.
 
 **HTTPS is not optional.** `getUserMedia` requires a secure context; over plain HTTP
@@ -108,7 +122,7 @@ the recorder does not merely warn, it fails to start.
 `backend/.env`:
 
 ```ini
-ECT_RELAY_URL=https://ect.sajitkhadka.com
+ECT_RELAY_URL=https://ect.int.sajitkhadka.com
 ECT_RELAY_TOKEN=<the token sealed into ect-relay-secrets>
 ECT_LOCAL_API_URL=http://127.0.0.1:8000
 ```
@@ -159,7 +173,7 @@ Start with the one question that splits the problem in half: **is the relay up, 
 does it think the PC is?**
 
 ```bash
-curl -u <user>:<pass> https://ect.sajitkhadka.com/api/relay/status
+curl -u <user>:<pass> https://ect.int.sajitkhadka.com/api/relay/status
 ```
 
 | Symptom | Where to look |

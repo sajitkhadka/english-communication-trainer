@@ -17,11 +17,11 @@
 [CmdletBinding()]
 param(
     [int]$Port = 8000,
-    # Loopback by default, and deliberately so: `PUT /api/notes` and
-    # `DELETE /api/sessions/{id}` are unauthenticated. ADR 0006 moves this to the LAN
-    # address so the relay can proxy to it, and pairs that with a firewall rule scoped
-    # to the relay host - ./enable-lan-access.ps1 creates it. Nothing else.
-    [string]$BindHost = $(if ($env:ECT_HOST) { $env:ECT_HOST } else { "127.0.0.1" }),
+    # Empty means "ask the app", below. Loopback is the default and deliberately so:
+    # `PUT /api/notes` and `DELETE /api/sessions/{id}` are unauthenticated. ADR 0006
+    # moves this to the LAN address so the relay can proxy to it, and pairs that with a
+    # firewall rule scoped to the relay host - ./enable-lan-access.ps1 creates it.
+    [string]$BindHost = "",
     [switch]$NoReload
 )
 
@@ -59,6 +59,18 @@ if (-not (Test-Path "$root/frontend/node_modules")) {
     Write-Host "frontend/node_modules missing - running npm install" -ForegroundColor Yellow
     Push-Location "$root/frontend"
     try { npm install } finally { Pop-Location }
+}
+
+# Ask pydantic-settings rather than reading .env here. ECT_HOST is documented as a
+# backend/.env setting, which PowerShell never sees, and a second parser in this script
+# would be a second definition of the precedence rules (env var beats .env beats
+# default). One source of truth, at the cost of one interpreter start.
+if (-not $BindHost) {
+    Push-Location "$root/backend"
+    try {
+        $BindHost = (uv run python -c "from app.config import settings; print(settings.host)").Trim()
+    } finally { Pop-Location }
+    if (-not $BindHost) { $BindHost = "127.0.0.1" }
 }
 
 $uvArgs = @("run", "uvicorn", "app.main:app", "--port", $Port, "--host", $BindHost)

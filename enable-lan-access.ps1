@@ -65,8 +65,12 @@ if ($address) {
     }
     Write-Host ""
     Write-Host "For backend/.env on this machine:" -ForegroundColor Cyan
-    Write-Host "  ECT_HOST=$address"
-    Write-Host "  ECT_RELAY_URL=https://ect.sajitkhadka.com"
+    # 0.0.0.0 and not $address: one uvicorn must serve loopback (Vite proxy, ect agent)
+    # and the LAN (the relay) at once. Binding only the LAN address breaks the first two
+    # and invites a second server, which is the double large-v3 load that kills the GPU
+    # worker outright.
+    Write-Host "  ECT_HOST=0.0.0.0        # not $address - see docs/relay.md"
+    Write-Host "  ECT_RELAY_URL=https://ect.int.sajitkhadka.com"
     Write-Host "  ECT_RELAY_TOKEN=<the token you sealed into ect-relay-secrets>"
     Write-Host ""
     Write-Host "Give this machine a DHCP reservation for $address before relying on it -" -ForegroundColor Yellow
@@ -121,7 +125,7 @@ if ($PSCmdlet.ShouldProcess("TCP $Port from $RelayHost only", "Create inbound fi
 
 Write-Host ""
 Write-Host "Next:" -ForegroundColor Cyan
-Write-Host "  1. put ECT_HOST=<the address above> in backend/.env"
+Write-Host "  1. put ECT_HOST=0.0.0.0 in backend/.env (one server, both interfaces)"
 Write-Host "  2. restart the API, then from the server:  curl http://<address>:$Port/api/health"
 Write-Host "  3. ./register-agent-task.ps1 -Start"
 Write-Host ""

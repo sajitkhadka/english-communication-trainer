@@ -112,6 +112,13 @@ so a retried upload and a re-drained item both collapse into the same session
 ADR 0003 stands, and arriving over the network does not change it. `journal` is the free
 exception, because it finalises itself at transcription.
 
+The agent's routes live under `/agent/`, not `/api/`, and that is a deployment
+constraint rather than taste: the recorder is behind an ingress basic-auth annotation,
+and a request carries one `Authorization` header, so a `Bearer` token on an `/api/`
+path is rejected before the relay sees it. The `/agent/` prefix is what a second,
+auth-free Ingress can exempt without also exposing the browser's own inbox routes or
+the digest.
+
 The whole thing is optional: with `ECT_RELAY_URL` unset, nothing above runs and the app
 is exactly what it was. See `docs/relay.md` and `docs/adr/0006-…`.
 

@@ -108,7 +108,7 @@ func TestUploadThenDrainCycle(t *testing.T) {
 		t.Fatalf("upload: want 201, got %d (%s)", rec.Code, rec.Body)
 	}
 
-	rec = do(t, s, agentReq("GET", "/api/inbox/pending", nil))
+	rec = do(t, s, agentReq("GET", "/agent/inbox/pending", nil))
 	body := decode(t, rec)
 	items, _ := body["items"].([]any)
 	if len(items) != 1 {
@@ -119,12 +119,12 @@ func TestUploadThenDrainCycle(t *testing.T) {
 		t.Fatalf("fields did not survive the upload: %v", item)
 	}
 
-	rec = do(t, s, agentReq("GET", "/api/inbox/capture-0001/blob", nil))
+	rec = do(t, s, agentReq("GET", "/agent/inbox/capture-0001/blob", nil))
 	if rec.Code != http.StatusOK || rec.Body.String() != "fake-opus" {
 		t.Fatalf("blob: got %d %q", rec.Code, rec.Body)
 	}
 
-	rec = do(t, s, agentReq("POST", "/api/inbox/capture-0001/ack",
+	rec = do(t, s, agentReq("POST", "/agent/inbox/capture-0001/ack",
 		strings.NewReader(`{"session_id": 42}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("ack: want 200, got %d (%s)", rec.Code, rec.Body)
@@ -136,7 +136,7 @@ func TestUploadThenDrainCycle(t *testing.T) {
 	if len(blobs) != 0 {
 		t.Fatalf("ack left blobs behind: %v", blobs)
 	}
-	rec = do(t, s, agentReq("GET", "/api/inbox/pending", nil))
+	rec = do(t, s, agentReq("GET", "/agent/inbox/pending", nil))
 	if items, _ := decode(t, rec)["items"].([]any); len(items) != 0 {
 		t.Fatalf("acked item is still pending: %v", items)
 	}
@@ -148,12 +148,12 @@ func TestReuploadingTheSameUIDReplacesRatherThanDuplicates(t *testing.T) {
 	do(t, s, uploadRequest(t, "capture-0002", "freeform", "", []byte("first")))
 	do(t, s, uploadRequest(t, "capture-0002", "freeform", "", []byte("second-longer")))
 
-	rec := do(t, s, agentReq("GET", "/api/inbox/pending", nil))
+	rec := do(t, s, agentReq("GET", "/agent/inbox/pending", nil))
 	items, _ := decode(t, rec)["items"].([]any)
 	if len(items) != 1 {
 		t.Fatalf("a retried upload created %d items, want 1", len(items))
 	}
-	rec = do(t, s, agentReq("GET", "/api/inbox/capture-0002/blob", nil))
+	rec = do(t, s, agentReq("GET", "/agent/inbox/capture-0002/blob", nil))
 	if rec.Body.String() != "second-longer" {
 		t.Fatalf("retry did not replace the blob: %q", rec.Body)
 	}
@@ -194,10 +194,10 @@ func TestFailAdvancesAttemptsAndKeepsTheItem(t *testing.T) {
 	s := newServer(t, "http://127.0.0.1:1")
 	do(t, s, uploadRequest(t, "capture-0005", "journal", "", []byte("audio")))
 
-	do(t, s, agentReq("POST", "/api/inbox/capture-0005/fail",
+	do(t, s, agentReq("POST", "/agent/inbox/capture-0005/fail",
 		strings.NewReader(`{"error": "session create failed"}`)))
 
-	rec := do(t, s, agentReq("GET", "/api/inbox/pending", nil))
+	rec := do(t, s, agentReq("GET", "/agent/inbox/pending", nil))
 	items, _ := decode(t, rec)["items"].([]any)
 	if len(items) != 1 {
 		t.Fatalf("a failed drain lost the capture")
@@ -218,12 +218,12 @@ func TestAgentEndpointsRequireTheToken(t *testing.T) {
 	for _, route := range []struct {
 		method, path string
 	}{
-		{"GET", "/api/inbox/pending"},
-		{"GET", "/api/inbox/abcdefgh/blob"},
-		{"POST", "/api/inbox/abcdefgh/ack"},
-		{"POST", "/api/inbox/abcdefgh/fail"},
-		{"POST", "/api/agent/heartbeat"},
-		{"PUT", "/api/digest"},
+		{"GET", "/agent/inbox/pending"},
+		{"GET", "/agent/inbox/abcdefgh/blob"},
+		{"POST", "/agent/inbox/abcdefgh/ack"},
+		{"POST", "/agent/inbox/abcdefgh/fail"},
+		{"POST", "/agent/heartbeat"},
+		{"PUT", "/agent/digest"},
 	} {
 		rec := do(t, s, httptest.NewRequest(route.method, route.path, strings.NewReader("{}")))
 		if rec.Code != http.StatusUnauthorized {
@@ -232,9 +232,44 @@ func TestAgentEndpointsRequireTheToken(t *testing.T) {
 	}
 }
 
+// The /agent/ prefix is exempt from the ingress basic-auth annotation, so anything
+// falling through it unauthenticated would be reachable with no credential at all.
+// `ect agent status` reads this. It cannot use /api/relay/status: that path is behind
+// the ingress basic-auth annotation, which rejects a Bearer header outright.
+func TestAgentStatusMirrorsTheBrowserView(t *testing.T) {
+	s := newServer(t, "http://127.0.0.1:1")
+	do(t, s, uploadRequest(t, "capture-0007", "worklog", "", []byte("audio")))
+
+	if rec := do(t, s, httptest.NewRequest("GET", "/agent/status", nil)); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401 without a token, got %d", rec.Code)
+	}
+	rec := do(t, s, agentReq("GET", "/agent/status", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 with the token, got %d", rec.Code)
+	}
+	status := decode(t, rec)
+	if status["relay"] != true || status["inbox_pending"].(float64) != 1 {
+		t.Fatalf("agent status does not match the browser view: %v", status)
+	}
+}
+
+func TestUnknownAgentRoutesDoNotFallThrough(t *testing.T) {
+	s := newServer(t, "http://127.0.0.1:1")
+	for _, path := range []string{"/agent/", "/agent/nonsense", "/agent/api/sessions"} {
+		rec := do(t, s, httptest.NewRequest("GET", path, nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: want 401 without a token, got %d", path, rec.Code)
+		}
+		rec = do(t, s, agentReq("GET", path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s: want 404 with a token, got %d", path, rec.Code)
+		}
+	}
+}
+
 func TestWrongTokenIsRejected(t *testing.T) {
 	s := newServer(t, "http://127.0.0.1:1")
-	req := httptest.NewRequest("GET", "/api/inbox/pending", nil)
+	req := httptest.NewRequest("GET", "/agent/inbox/pending", nil)
 	req.Header.Set("authorization", "Bearer not-the-token")
 	if rec := do(t, s, req); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("want 401, got %d", rec.Code)
@@ -270,7 +305,7 @@ func sampleDigest() []byte {
 
 func pushDigest(t *testing.T, s *Server) {
 	t.Helper()
-	rec := do(t, s, agentReq("PUT", "/api/digest", bytes.NewReader(sampleDigest())))
+	rec := do(t, s, agentReq("PUT", "/agent/digest", bytes.NewReader(sampleDigest())))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("digest push: want 200, got %d (%s)", rec.Code, rec.Body)
 	}
@@ -498,7 +533,7 @@ func TestDigestSurvivesARestart(t *testing.T) {
 
 func TestDigestPushRejectsGarbage(t *testing.T) {
 	s := newServer(t, "http://127.0.0.1:1")
-	rec := do(t, s, agentReq("PUT", "/api/digest", strings.NewReader("not json")))
+	rec := do(t, s, agentReq("PUT", "/agent/digest", strings.NewReader("not json")))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("want 400, got %d", rec.Code)
 	}

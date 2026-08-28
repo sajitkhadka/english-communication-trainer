@@ -136,13 +136,13 @@ class Agent:
             api_ok = self.local.get("/api/health").status_code == 200
         except httpx.HTTPError as exc:
             log.debug("local API not answering: %s", exc)
-        response = self.relay.post("/api/agent/heartbeat", json={"api_ok": api_ok})
+        response = self.relay.post("/agent/heartbeat", json={"api_ok": api_ok})
         response.raise_for_status()
         return response.json()
 
     # -------------------------------------------------------------------- drain
     def pending(self) -> list[dict[str, Any]]:
-        response = self.relay.get("/api/inbox/pending")
+        response = self.relay.get("/agent/inbox/pending")
         response.raise_for_status()
         return response.json().get("items", [])
 
@@ -183,7 +183,7 @@ class Agent:
         session_id = session["id"]
 
         if session.get("status") == "awaiting_recording" or not session.get("has_audio"):
-            blob = self.relay.get(f"/api/inbox/{uid}/blob")
+            blob = self.relay.get(f"/agent/inbox/{uid}/blob")
             blob.raise_for_status()
             filename = item.get("filename") or f"{uid}.webm"
             content_type = item.get("content_type") or "application/octet-stream"
@@ -206,7 +206,7 @@ class Agent:
         # Ack last, and only after the audio is on the PC's disk: the relay deletes the
         # blob on ack, so acking any earlier would trade a duplicate for a lost
         # recording. The blob is the only copy until this point.
-        ack = self.relay.post(f"/api/inbox/{uid}/ack", json={"session_id": session_id})
+        ack = self.relay.post(f"/agent/inbox/{uid}/ack", json={"session_id": session_id})
         ack.raise_for_status()
 
         log.info("drained %s -> session %s (%s)", uid, session_id, session.get("mode"))
@@ -237,7 +237,7 @@ class Agent:
         reach from the phone that recorded it.
         """
         try:
-            self.relay.post(f"/api/inbox/{uid}/fail", json={"error": str(exc)[:500]})
+            self.relay.post(f"/agent/inbox/{uid}/fail", json={"error": str(exc)[:500]})
         except httpx.HTTPError:
             log.debug("could not report the failure of %s to the relay", uid)
 
@@ -250,7 +250,7 @@ class Agent:
         version = payload.get("version")
         if version == self._digest_version and not force:
             return {"pushed": False, "version": version, "reason": "unchanged"}
-        push = self.relay.put("/api/digest", json=payload)
+        push = self.relay.put("/agent/digest", json=payload)
         push.raise_for_status()
         self._digest_version = version
         log.info("digest pushed (version %s, %s sessions)", version, len(payload["sessions"]))
@@ -315,7 +315,7 @@ def status() -> dict[str, Any]:
             report["local_api"] = f"unreachable: {exc}"
         try:
             response = client.get(
-                f"{settings.relay_url.rstrip('/')}/api/relay/status",
+                f"{settings.relay_url.rstrip('/')}/agent/status",
                 headers={"authorization": f"Bearer {settings.relay_token}"},
             )
             report["relay"] = (
