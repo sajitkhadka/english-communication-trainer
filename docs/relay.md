@@ -117,6 +117,9 @@ Argo CD.
 **HTTPS is not optional.** `getUserMedia` requires a secure context; over plain HTTP
 the recorder does not merely warn, it fails to start.
 
+Building by hand is the bootstrap path. After that, releases go through CI - see
+[Shipping a new relay](#shipping-a-new-relay) below.
+
 ### 4. Point the agent at it
 
 `backend/.env`:
@@ -130,6 +133,43 @@ ECT_LOCAL_API_URL=http://127.0.0.1:8000
 ```powershell
 ./register-agent-task.ps1 -Start
 ```
+
+## Shipping a new relay
+
+`.github/workflows/deploy.yml` fires on a `relay-v*.*.*` tag and does two things:
+builds and pushes the image, then commits the new tag into the `k8s-config` repo.
+
+```sh
+git tag relay-v0.2.0 && git push origin relay-v0.2.0
+```
+
+It stops there on purpose. Argo CD is on manual sync, so a tag *stages* a release;
+`ect-relay` shows OutOfSync until someone syncs it at
+<https://argo.int.sajitkhadka.com>. Nothing here talks to the cluster directly - an
+image set with `kubectl set image` exists nowhere in git, so Argo CD calls it drift
+and reverts it on the next sync.
+
+Only the relay ships this way. The backend and agent run on the PC from a git
+checkout; that split is the whole point of ADR 0006, and there is no image for them.
+
+Three things have to exist for the workflow to work, and all three are per-repo:
+
+- Actions secrets `REGISTRY_USER`, `REGISTRY_PASSWORD` (the LAN registry login) and
+  `K8S_CONFIG_DEPLOY_KEY` (a write-enabled deploy key on `k8s-config`, not a PAT -
+  a PAT would carry the whole account)
+- a self-hosted runner, `sserver-ect`. The registry is plain HTTP on a private
+  address, so only a machine inside the network can push to it. Runners on a personal
+  account cannot be shared between repos, so this repo has its own even though
+  `sserver` already runs three.
+
+Where each credential lives is recorded in `linux/CREDENTIALS.md`.
+
+**Do not add a plain `Secret` manifest to `k8s-config/ect-relay/`, even as an
+example.** Argo CD applies every valid manifest in the app directory, so a template
+with a `${PLACEHOLDER}` in it overwrites what the sealed-secrets controller wrote -
+and because a running pod never rereads its environment, the damage only appears at
+the next restart, as `ect agent` suddenly getting a 401. The Application excludes
+`*.example.yaml` for exactly this reason.
 
 ## Running it by hand
 
@@ -185,6 +225,7 @@ curl -u <user>:<pass> https://ect.int.sajitkhadka.com/api/relay/status
 | everything reads fine, writes 503 | working as designed — the PC is offline. |
 | recorder will not start | not a secure context. Check you are on `https://`, not an IP. |
 | `inbox_pending` climbing, PC awake | the agent is not running. `./register-agent-task.ps1 -Status`. |
+| `ect agent status` shows `relay: 401`, and nothing changed on the PC | the relay's copy of the token changed under it. `kubectl -n ect-relay describe secret ect-relay-secrets` - `ECT_RELAY_TOKEN` should be 64 bytes. A shorter one means something applied a template over it. |
 
 Logs: `%LOCALAPPDATA%\ect-agent.log` on the PC,
 `kubectl -n ect-relay logs deploy/ect-relay` on the server.
