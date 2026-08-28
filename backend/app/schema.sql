@@ -50,11 +50,23 @@ CREATE TABLE IF NOT EXISTS sessions (
   -- session is processed (or, for `journal`, never - there is no processing). Doubles
   -- as the UI's compact label and the human-readable part of the output filename.
   title             TEXT,
-  summary           TEXT
+  summary           TEXT,
+  -- ADDITIVE (docs/adr/0006-remote-capture-local-processing.md): the id the *recorder*
+  -- minted for this capture, before any session existed. A recording made on a phone
+  -- reaches this database over the network via the relay inbox, and both hops retry:
+  -- the phone re-uploads a blob whose POST timed out, and `ect agent` re-drains an
+  -- item whose ack was lost. This column is what makes both retries idempotent -
+  -- `services.create_session` returns the existing row instead of a duplicate session.
+  -- NULL for every session created the ordinary way, at the desk.
+  external_uid      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_mode   ON sessions(mode);
+-- A unique *index* rather than a UNIQUE column: SQLite's ALTER TABLE cannot add a
+-- UNIQUE column, so this is the only form that is identical on a fresh database and
+-- on one migrated by db._migrate. Multiple NULLs are allowed, which is the point.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_external_uid ON sessions(external_uid);
 
 CREATE TABLE IF NOT EXISTS scores (
   id             INTEGER PRIMARY KEY,
@@ -129,4 +141,32 @@ CREATE TABLE IF NOT EXISTS worklog_rollups (
   month      TEXT UNIQUE NOT NULL,          -- 'YYYY-MM'
   path       TEXT NOT NULL,
   created_at TEXT
+);
+
+-- ADDITIVE: the recording archive (docs/adr/0008-recordings-out-of-git.md).
+--
+-- Recordings are the one artifact that is NOT in the data repo - 129 kbps mono Opus
+-- straight from MediaRecorder, ~1 MB/minute, 100 MB by session 23 - so their location
+-- and integrity are not something `git status` can answer any more. This table is what
+-- answers it instead: what the source was, what the compressed archive is, and whether
+-- the off-machine copy has been verified.
+--
+-- One row per session, written by `ect archive`. Nothing here is required for the app
+-- to work: a missing row means "not archived yet", never an error. The audio itself is
+-- still addressed by sessions.audio_path - this table describes it, it does not replace
+-- it.
+CREATE TABLE IF NOT EXISTS recording_archives (
+  session_id     INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  source_path    TEXT NOT NULL,        -- repo-relative, the original as recorded
+  source_bytes   INTEGER NOT NULL,
+  source_sha256  TEXT NOT NULL,        -- of the original, so a re-encode is never silent
+  source_present INTEGER NOT NULL DEFAULT 1,   -- 0 once the original is deleted locally
+  archive_path   TEXT,                 -- repo-relative, the compressed .opus
+  archive_bytes  INTEGER,
+  archive_sha256 TEXT,
+  bitrate_kbps   INTEGER,
+  compressed_at  TEXT,
+  verified_at    TEXT,                 -- last time hashes were re-checked on disk
+  synced_at      TEXT,                 -- last confirmed copy off this machine
+  sync_target    TEXT
 );

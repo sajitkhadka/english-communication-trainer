@@ -146,6 +146,48 @@ class TestCli:
         assert report["dormant"][0]["times_used_correctly"] == 0
         assert report["dormant"][0]["times_seen"] == 2
 
+    def test_brief_drops_sm2_bookkeeping_but_keeps_the_judgement_fields(self, data_dir, capsys):
+        """`--brief` exists to cut tokens on the /process-session path. It may only drop
+        fields the model never reads - `meaning` decides whether a term fitted the
+        session and `notes` says how it was missed last time, so both have to survive."""
+        import json
+
+        from app.cli import main
+
+        with dbmod.cursor() as conn:
+            word_id = seed(conn, "de-risk", seen=2, correct=0)
+            conn.execute(
+                "UPDATE words SET meaning = ?, example = ?, notes = ? WHERE id = ?",
+                ("reduce the risk of a change", "We de-risked the migration.", "misused", word_id),
+            )
+        assert main(["vocab", "gaps", "--brief"]) == 0
+        term = json.loads(capsys.readouterr().out)["dormant"][0]
+
+        assert term["meaning"] == "reduce the risk of a change"
+        assert term["notes"] == "misused"
+        assert term["times_seen"] == 2
+        assert term["times_used_correctly"] == 0
+        for dropped in ("example", "due_date", "interval_days", "source", "id"):
+            assert dropped not in term
+
+    def test_brief_leaves_the_headline_numbers_alone(self, data_dir, capsys):
+        """Section 4 of the feedback opens with `activation_rate` and the weakest
+        `by_kind` entry, so trimming the term records must not touch the stats."""
+        import json
+
+        from app.cli import main
+
+        with dbmod.cursor() as conn:
+            seed(conn, "de-risk", seen=2, correct=0)
+            seed(conn, "bottleneck", seen=2, correct=2)
+        assert main(["vocab", "gaps", "--brief"]) == 0
+        brief = json.loads(capsys.readouterr().out)
+        assert main(["vocab", "gaps"]) == 0
+        full = json.loads(capsys.readouterr().out)
+
+        assert brief["stats"] == full["stats"]
+        assert brief["by_kind"] == full["by_kind"]
+
 
 class TestLearningNotes:
     def test_seeded_and_never_clobbered(self, data_dir):

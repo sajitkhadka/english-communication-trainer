@@ -12,10 +12,16 @@
     ./dev.ps1
     ./dev.ps1 -Port 8080          # API on 8080; the Vite proxy follows automatically
     ./dev.ps1 -NoReload           # skip the uvicorn reloader (lower CPU, no auto-restart)
+    ./dev.ps1 -BindHost 0.0.0.0   # or set ECT_HOST - reachable from the relay (ADR 0006)
 #>
 [CmdletBinding()]
 param(
     [int]$Port = 8000,
+    # Empty means "ask the app", below. Loopback is the default and deliberately so:
+    # `PUT /api/notes` and `DELETE /api/sessions/{id}` are unauthenticated. ADR 0006
+    # moves this to the LAN address so the relay can proxy to it, and pairs that with a
+    # firewall rule scoped to the relay host - ./enable-lan-access.ps1 creates it.
+    [string]$BindHost = "",
     [switch]$NoReload
 )
 
@@ -55,8 +61,25 @@ if (-not (Test-Path "$root/frontend/node_modules")) {
     try { npm install } finally { Pop-Location }
 }
 
-$uvArgs = @("run", "uvicorn", "app.main:app", "--port", $Port)
+# Ask pydantic-settings rather than reading .env here. ECT_HOST is documented as a
+# backend/.env setting, which PowerShell never sees, and a second parser in this script
+# would be a second definition of the precedence rules (env var beats .env beats
+# default). One source of truth, at the cost of one interpreter start.
+if (-not $BindHost) {
+    Push-Location "$root/backend"
+    try {
+        $BindHost = (uv run python -c "from app.config import settings; print(settings.host)").Trim()
+    } finally { Pop-Location }
+    if (-not $BindHost) { $BindHost = "127.0.0.1" }
+}
+
+$uvArgs = @("run", "uvicorn", "app.main:app", "--port", $Port, "--host", $BindHost)
 if (-not $NoReload) { $uvArgs += "--reload" }
+
+if ($BindHost -ne "127.0.0.1" -and $BindHost -ne "localhost") {
+    Write-Warning ("the API is binding to $BindHost, not loopback. It is unauthenticated - " +
+                   "make sure ./enable-lan-access.ps1 has scoped the firewall rule to the relay.")
+}
 
 Write-Host "API      http://127.0.0.1:$Port  (/docs for the API browser)" -ForegroundColor Cyan
 Write-Host "frontend http://localhost:5173" -ForegroundColor Cyan

@@ -1,6 +1,6 @@
 # ADR 0006 — Remote capture, local processing
 
-**Status:** Proposed · **Date:** 2026-08-25 · **Extends:** ADR 0003
+**Status:** Accepted · **Date:** 2026-08-25 · **Implemented:** 2026-08-26 · **Extends:** ADR 0003
 
 ## Context
 
@@ -17,9 +17,18 @@ the desk, and the sessions most worth having are the ones it cannot take: the wo
 the commute, the brainstorm on a walk, the journal entry away from home.
 
 The available infrastructure shapes what is worth building. A home Linux server sits on
-the same LAN as the PC, is publicly reachable through Nginx Proxy Manager on 80/443 with
-Let's Encrypt, runs Docker with a private registry on `:5000`, and terminates WireGuard
-on `:64648`.
+the same LAN as the PC, is publicly reachable on 80/443 with Let's Encrypt, runs a
+private Docker registry on `:5000`, and terminates WireGuard on `:64648`.
+
+> **Amended 2026-08-26.** This paragraph originally said "publicly reachable through
+> Nginx Proxy Manager" and "runs Docker". Both were already stale when it was written:
+> the server's workloads had moved to a single-node **k3s** cluster where
+> `ingress-nginx` holds 80/443 and cert-manager issues the certificates, and since
+> 2026-08-25 **Argo CD** reconciles the `k8s-config` repository into it. NPM and the
+> `/opt` compose stacks still exist on disk but are not running. Nothing in the
+> decision depended on which proxy it was — the relay is a plain HTTP service behind
+> whatever terminates TLS — so the substance below stands. The two places it shows up
+> are recorded inline.
 
 Two facts constrain the solution more than they first appear:
 
@@ -84,10 +93,37 @@ commute is complete before the user sits down.
 involved in the data path. Wake-on-LAN covers a sleeping PC: queued work plus a stale
 heartbeat triggers a magic packet.
 
-Supporting changes: an `ADDITIVE` `external_uid TEXT UNIQUE` column on `sessions` for
-idempotent drains (`schema.sql` is `CREATE TABLE IF NOT EXISTS`, not a migration system,
-so this is an explicit `ALTER TABLE`); an inbound firewall rule on 8000 scoped to the
-server's address; NPM access control in front of the recorder.
+> **Amended 2026-08-26.** Wake-on-LAN is implemented but **left disabled**, and the
+> reason is physical rather than technical: the PC is on Wi-Fi (Intel AX201), not
+> Ethernet. Waking a sleeping Wi-Fi NIC is WoWLAN, which most laptops either do not
+> support or disable on battery, so a magic packet would most likely be theatre. The
+> code and the config are in place for the day the PC is wired; until then a capture
+> simply waits in the inbox until the PC is next up. Nothing else in the design leans
+> on waking, which is why this costs a paragraph rather than a redesign — but it does
+> mean the third rollout phase below delivered one of its two halves.
+>
+> It also means the ceiling described in the Consequences is a little lower than
+> intended: with the PC asleep, the round trip is bounded by when you next open the
+> laptop, not by a timer.
+
+Supporting changes: an `ADDITIVE` `external_uid` column on `sessions` for idempotent
+drains (`schema.sql` is `CREATE TABLE IF NOT EXISTS`, not a migration system, so this is
+an explicit `ALTER TABLE`); an inbound firewall rule on 8000 scoped to the server's
+address; access control in front of the recorder.
+
+> **Amended 2026-08-26.** Two details did not survive contact with the implementation.
+>
+> *`external_uid TEXT UNIQUE`* is a unique **index**, not a `UNIQUE` column: SQLite's
+> `ALTER TABLE` cannot add a `UNIQUE` column, so a plain column plus
+> `CREATE UNIQUE INDEX IF NOT EXISTS` is the only form that is identical on a fresh
+> database and on a migrated one. Multiple NULLs are still allowed, which is what
+> sessions created at the desk need.
+>
+> *"NPM access control"* is an `ingress-nginx` basic-auth annotation, per the amendment
+> above. It is paired with a second, separate credential — a bearer token the relay
+> requires on the agent's endpoints — so the agent's long-lived machine credential is
+> never the one typed into a phone. One mechanism would have been simpler; two is worth
+> it because the two credentials have genuinely different lifetimes and blast radii.
 
 ## Alternatives
 
@@ -140,17 +176,78 @@ private registry.
   reservation are load-bearing, not hygiene — `PUT /api/notes` and
   `DELETE /api/sessions/{id}` are unauthenticated and now reachable from the network.
 - A microphone becomes publicly addressable, and `worklog` recordings contain employer
-  and project detail. NPM access control on the recorder and deletion of inbox blobs on
+  and project detail. Access control on the recorder and deletion of inbox blobs on
   `ack` are part of the design, not follow-up work.
+
+  > **Amended 2026-08-28.** It is *not* publicly addressable, in the end. The relay is
+  > deployed at `ect.int.sajitkhadka.com` under the `*.int` scheme of the cluster's
+  > ADR 0003: an allowlist of `192.168.0.0/24` and `10.66.66.0/24` on the Ingress, a
+  > wildcard A record pointing at a private address, and a `letsencrypt-dns01`
+  > certificate so the secure context `getUserMedia` demands still exists. The recorder
+  > is reachable from the LAN and over the WireGuard tunnel, and from nowhere else.
+  >
+  > This is strictly better for the concern above, and it costs something real: capture
+  > now requires the tunnel to be up on the phone. "Record from anywhere with no prior
+  > setup" becomes "record from anywhere the tunnel reaches", and a commute recording
+  > made with WireGuard off fails at the point of upload rather than queueing. The
+  > tunnel is full-tunnel (`AllowedIPs = 0.0.0.0/0`), so in practice "reachable
+  > remotely" and "only from my own network" are the same thing — which is exactly the
+  > argument ADR 0003 makes.
+  >
+  > Basic auth stays on regardless. It fronts a microphone *and* an unauthenticated
+  > API, and everyone on the home wifi is still a wider audience than one person.
 - The digest is lossy by construction: no audio, no transcripts, no per-word timings, and
   a horizon on feedback markdown. Offline history is for reading what was said about a
   session, not for replaying it.
 - Running the backend at boot is the least certain part. CUDA under a session-0 service
   account is a well-known failure, so `ect doctor` must be verified under whichever
   account Task Scheduler uses before anything is built on top of it.
-- Rollout is ordered so that risk comes first: (1) LAN binding, backend at boot, NPM
-  host — remote access working with no new code, and the boot question answered; (2) the
-  inbox, recorder and drain loop; (3) digest and Wake-on-LAN.
+- Rollout is ordered so that risk comes first: (1) LAN binding, backend at boot, the
+  public host — remote access working with no new code, and the boot question answered;
+  (2) the inbox, recorder and drain loop; (3) digest and Wake-on-LAN.
 - If the ceiling in the second bullet ever becomes the complaint, the escape route is the
   first rejected alternative, and the digest contract is the thing that would grow into
   it. Nothing here forecloses that.
+
+## Implementation notes (2026-08-26)
+
+Built as specified, with the three amendments recorded inline above. Two choices the ADR
+left open, resolved during implementation:
+
+**The relay is internal-only.** Recorded in the Consequences above rather than here,
+because it changes what the system promises rather than how it is built.
+
+**The relay is Go, not Python.** The rest of the repo is Python and React, so this is the
+one genuine departure. It buys a ~16 MB static binary on a distroless image for a service
+whose entire job is proxying, streaming uploads to disk, and serving JSON — and it keeps
+`torch` out of a container that has no business owning any of it. The cost is a second
+language in the repo; it is confined to `relay/`, which deploys separately and shares no
+code with the backend either way.
+
+**The recorder always uses the inbox, even when the PC is up.** The ADR's routing table
+only requires this when the PC is offline. Always taking the same path means capture has
+one code path instead of two, and the one that works in every state is the one that gets
+exercised on every recording — rather than the rare path being the one you find out is
+broken on the commute. With the PC awake the round trip is a few seconds.
+
+The rollout's third phase delivered the digest but not a working Wake-on-LAN, for the
+physical reason recorded above.
+
+Two things the design did not anticipate, both found by running it rather than reading
+it:
+
+**Basic auth and the agent's bearer token cannot share a host root.** A request carries
+one `Authorization` header, so the ingress basic-auth annotation rejects the agent
+outright. The agent's routes therefore live under a single `/agent/` prefix that a
+second, annotation-free Ingress exempts. Splitting by path under `/api/` was tried
+first and is not safe: `/api/inbox/` also matches the browser's own upload, and
+exempting `/api/digest` for the agent's `PUT` would expose the whole snapshot to a
+`GET`. The relay guards everything under `/agent/`, including unknown paths, so a typo
+cannot fall through to the switchboard.
+
+**`ECT_HOST` must be `0.0.0.0`, not the LAN address.** One uvicorn has to serve both
+interfaces — the Vite proxy and the agent reach it on loopback, the relay on the LAN.
+Binding only the LAN address breaks the first two and invites a second server onto
+loopback, which is precisely the double `large-v3` load `_gpu_lock` cannot prevent:
+it is a `threading.Lock`, so it guards one process. During bring-up this briefly left
+two API processes running at once.

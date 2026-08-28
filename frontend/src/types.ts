@@ -41,6 +41,8 @@ export interface Session {
   notes: string | null;
   title: string | null;
   summary: string | null;
+  /** Set when the recording arrived over the relay rather than being made here. */
+  external_uid: string | null;
   score: Score | null;
   has_audio: boolean;
   has_transcript: boolean;
@@ -244,4 +246,53 @@ export interface Health {
   device: string;
   pending_sessions: number;
   sessions_by_mode: Record<Mode, number>;
+}
+
+// --- the relay (docs/adr/0006-remote-capture-local-processing.md) ---
+
+/** Modes that can be captured remotely: the four that need no prior setup. The coached
+ *  modes carry target words chosen by `/generate-topic`, which is desk work. */
+export type RemoteMode = "freeform" | "worklog" | "brainstorm" | "journal";
+
+/** `GET /api/relay/status`, answered only by the relay - the PC's API 404s it, which is
+ *  exactly how the app tells which side it is being served from. */
+export interface RelayStatus {
+  relay: true;
+  pc_online: boolean;
+  pc: {
+    online: boolean;
+    api_ok: boolean;
+    proxy_failed: boolean;
+    ttl_seconds: number;
+    last_heartbeat: string | null;
+    seconds_since_heartbeat: number | null;
+  };
+  inbox_pending: number;
+  digest_version: string | null;
+  digest_at: string | null;
+  digest_sessions: number;
+  modes: RemoteMode[];
+}
+
+/** One capture in the relay inbox, on its way to the PC. */
+export interface InboxItem {
+  uid: string;
+  mode: RemoteMode;
+  topic?: string;
+  bytes: number;
+  created_at: string;
+  acked_at?: string;
+  session_id?: number | null;
+  attempts: number;
+  last_error?: string;
+}
+
+export interface InboxUploadResult {
+  uid: string;
+  mode: RemoteMode;
+  bytes: number;
+  created_at: string;
+  inbox_pending: number;
+  pc_online: boolean;
+  hint: string;
 }

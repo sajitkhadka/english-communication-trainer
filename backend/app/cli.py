@@ -33,6 +33,12 @@ VOCAB_SLICE = (
 # different findings the whole command exists to tell apart.
 GAP_ALWAYS = ("term", "times_seen", "times_used_correctly")
 
+# `--brief`: what /process-session actually needs to decide whether a dormant term had a
+# slot in this session. `meaning` decides fit and `notes` says how it was missed last
+# time; `example`, `due_date`, `interval_days` and `source` are SM-2 bookkeeping the
+# backend acts on and the model never reads. Roughly half the tokens of the full report.
+GAP_BRIEF_SLICE = ("term", "kind", "meaning", "times_seen", "times_used_correctly", "notes")
+
 
 def emit(data: Any) -> None:
     if isinstance(data, str):
@@ -110,8 +116,9 @@ def cmd_vocab_gaps(args: argparse.Namespace) -> int:
     """Active vs. passive corpus: what the user recognises but does not reach for."""
     with dbmod.cursor() as conn:
         report = dbmod.vocabulary_gaps(conn, limit=args.limit, kind=args.kind)
+    keys = GAP_BRIEF_SLICE if args.brief else VOCAB_SLICE
     for bucket in dbmod.GAP_BUCKETS:
-        report[bucket] = [slim(r, VOCAB_SLICE, always=GAP_ALWAYS) for r in report[bucket]]
+        report[bucket] = [slim(r, keys, always=GAP_ALWAYS) for r in report[bucket]]
     emit(report)
     return 0
 
@@ -479,8 +486,179 @@ def cmd_suggest_add(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# agent (ADR 0006)
+# --------------------------------------------------------------------------- #
+
+
+def _agent_or_exit() -> Any:
+    from .agent import Agent, AgentError
+
+    try:
+        return Agent()
+    except AgentError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+
+def cmd_agent_run(args: argparse.Namespace) -> int:
+    import logging
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+    )
+    with _agent_or_exit() as agent:
+        try:
+            agent.run_forever()
+        except KeyboardInterrupt:
+            print("agent stopped", file=sys.stderr)
+    return 0
+
+
+def cmd_agent_once(args: argparse.Namespace) -> int:
+    """A single pass. What to run when remote capture 'did not arrive'."""
+    with _agent_or_exit() as agent:
+        report: dict[str, Any] = {"heartbeat": agent.heartbeat()}
+        report.update(agent.drain().as_dict())
+        if not args.no_digest:
+            report["digest"] = agent.push_digest(force=args.force_digest)
+    emit(report)
+    return 0
+
+
+def cmd_agent_status(args: argparse.Namespace) -> int:
+    from .agent import status
+
+    report = status()
+    emit(report)
+    return 0 if report.get("ok") else 1
+
+
+def cmd_agent_digest(args: argparse.Namespace) -> int:
+    """Print the snapshot itself - what the relay would serve while the PC is off."""
+    from .digest import build_digest
+
+    payload = build_digest(feedback_horizon=args.horizon)
+    if args.summary:
+        emit(
+            {
+                "version": payload["version"],
+                "generated_at": payload["generated_at"],
+                "feedback_horizon": payload["feedback_horizon"],
+                "sessions": len(payload["sessions"]),
+                "with_feedback": sum(
+                    1 for d in payload["session_details"].values() if d.get("feedback_markdown")
+                ),
+                "words": len(payload["words"]),
+                "bytes": len(json.dumps(payload, default=str)),
+            }
+        )
+    else:
+        emit(payload)
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # parser
 # --------------------------------------------------------------------------- #
+
+
+def _mb(n: int | None) -> str:
+    return f"{(n or 0) / 1e6:.1f} MB"
+
+
+def cmd_archive_status(args: argparse.Namespace) -> int:
+    """What is on this machine, what is tracked, and what is confirmed off it."""
+    report = services.archive_status()
+    if args.json:
+        emit(report)
+        return 0
+    t = report["totals"]
+    print(f"{'id':>4}  {'mode':<11} {'size':>9}  {'tracked':<8} {'copy':<9} synced")
+    for e in report["sessions"]:
+        synced = (e["synced_at"] or "")[:10] or "-"
+        size = _mb(e["source_bytes"]) if e["source_present"] else "(gone)"
+        copy = "archive" if e["compressed"] else ("original" if e["source_present"] else "-")
+        tracked = "yes" if e["tracked"] else "NO"
+        print(f"{e['session_id']:>4}  {e['mode']:<11} {size:>9}  {tracked:<8} {copy:<9} {synced}")
+    print(
+        f"\n{t['sessions']} recordings | {_mb(t['source_bytes'])} on disk | "
+        f"{t['untracked']} untracked | {t['unsynced']} not confirmed off this machine"
+    )
+    if t["missing"]:
+        print(f"{t['missing']} recording(s) are gone from disk - run `ect archive verify`.")
+    if t["untracked"]:
+        print(
+            "Run `ect archive track` to hash and record them - that is what makes an\n"
+            "altered or missing file detectable now the audio is not in git."
+        )
+    if t["reclaimable_bytes"]:
+        print(
+            f"{_mb(t['reclaimable_bytes'])} of originals have a compressed archive and "
+            f"could be dropped - only once `synced` is set."
+        )
+    return 0
+
+
+def cmd_archive_track(args: argparse.Namespace) -> int:
+    """Hash the recordings and record them, without transcoding anything."""
+    emit(services.track_recordings(rehash=args.rehash))
+    return 0
+
+
+def cmd_archive_compress(args: argparse.Namespace) -> int:
+    if args.session:
+        emit(
+            services.compress_recording(
+                args.session, bitrate_kbps=args.bitrate, drop_original=args.drop_original
+            )
+        )
+        return 0
+    result = services.compress_pending(
+        bitrate_kbps=args.bitrate, drop_original=args.drop_original, limit=args.limit
+    )
+    emit(result)
+    return 1 if result["failed"] else 0
+
+
+def cmd_archive_manifest(args: argparse.Namespace) -> int:
+    manifest = services.archive_manifest()
+    if args.format == "sha256":
+        # `sha256sum -c` format, deliberately: the check then runs with coreutils on the
+        # far end and needs nothing of this project installed there.
+        root = "data/recordings/"
+        lines = [
+            f"{f['sha256']}  {f['path'][len(root) :] if f['path'].startswith(root) else f['path']}"
+            for f in manifest["files"]
+            if f["sha256"]
+        ]
+        body = "\n".join(lines) + ("\n" if lines else "")
+    else:
+        body = json.dumps(manifest, indent=2, ensure_ascii=False)
+
+    if args.out:
+        # newline="\n" explicitly. On Windows the default translates it to CRLF, and
+        # `sha256sum -c` on the server then looks for a filename with a trailing CR
+        # and reports every file missing. The manifest is written on whichever machine
+        # holds the recordings and read on the server, so it is always written for the
+        # reader.
+        with open(args.out, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(body)
+        print(f"{manifest['count']} files -> {args.out}")
+        return 0
+    print(body, end="" if args.format == "sha256" else "\n")
+    return 0
+
+
+def cmd_archive_verify(args: argparse.Namespace) -> int:
+    report = services.verify_archives(deep=args.deep)
+    emit(report)
+    return 0 if report["ok"] else 1
+
+
+def cmd_archive_synced(args: argparse.Namespace) -> int:
+    emit(services.mark_synced(args.session or None, target=args.target))
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse setup
@@ -516,6 +694,12 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     )
     p.add_argument("--limit", type=int, default=30, help="max terms per bucket")
     p.add_argument("--kind", choices=["word", "phrase", "idiom"])
+    p.add_argument(
+        "--brief",
+        action="store_true",
+        help="drop the SM-2 bookkeeping and example sentences; keeps term, kind, "
+        "meaning, notes and the usage counters. Use this when handing gaps to Claude.",
+    )
     p.set_defaults(func=cmd_vocab_gaps)
     vocab_sub.add_parser("stats", help="corpus totals").set_defaults(func=cmd_vocab_stats)
     p = vocab_sub.add_parser("add", help="bulk-add words from JSON")
@@ -658,6 +842,83 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     p = sug_sub.add_parser("add", help="add suggestions from JSON")
     p.add_argument("--json", required=True)
     p.set_defaults(func=cmd_suggest_add)
+
+    # --- archive -----------------------------------------------------------------
+    arch_p = sub.add_parser("archive", help="recording archive: compress, track, verify")
+    arch_sub = arch_p.add_subparsers(dest="action", required=True)
+
+    p = arch_sub.add_parser("status", help="what is compressed, and what is off this machine")
+    p.add_argument("--json", action="store_true", help="machine-readable instead of a table")
+    p.set_defaults(func=cmd_archive_status)
+
+    p = arch_sub.add_parser("compress", help="transcode recordings to low-bitrate Opus")
+    p.add_argument("--session", type=int, help="one session; default is every uncompressed one")
+    p.add_argument(
+        "--bitrate", type=int, default=24, help="kbps, mono Opus (default 24; 16 is smaller)"
+    )
+    p.add_argument("--limit", type=int, help="stop after this many, for a first run")
+    p.add_argument(
+        "--drop-original",
+        action="store_true",
+        help="delete the source after the archive verifies. Only with a confirmed "
+        "off-machine copy.",
+    )
+    p.set_defaults(func=cmd_archive_compress)
+
+    p = arch_sub.add_parser("track", help="hash and record recordings (no transcoding)")
+    p.add_argument(
+        "--rehash",
+        action="store_true",
+        help="re-read every file instead of trusting an unchanged size",
+    )
+    p.set_defaults(func=cmd_archive_track)
+
+    p = arch_sub.add_parser("manifest", help="the file list + hashes a sync tool should move")
+    p.add_argument("--out", help="write here instead of stdout")
+    p.add_argument(
+        "--format",
+        choices=["json", "sha256"],
+        default="json",
+        help="sha256 emits `sha256sum -c` format, checkable on the server with coreutils",
+    )
+    p.set_defaults(func=cmd_archive_manifest)
+
+    p = arch_sub.add_parser("verify", help="re-check disk against what was recorded")
+    p.add_argument("--deep", action="store_true", help="re-hash, not just size (slow)")
+    p.set_defaults(func=cmd_archive_verify)
+
+    p = arch_sub.add_parser("synced", help="record that a copy is confirmed off this machine")
+    p.add_argument("--session", type=int, nargs="*", help="default is all archived sessions")
+    p.add_argument(
+        "--target", required=True, help="where it was confirmed, e.g. 'homeserver:/srv/ect'"
+    )
+    p.set_defaults(func=cmd_archive_synced)
+
+    # agent (ADR 0006) - remote capture drain, heartbeat, digest push
+    ag_p = sub.add_parser("agent", help="drain the relay inbox and mirror the digest")
+    ag_sub = ag_p.add_subparsers(dest="action", required=True)
+
+    p = ag_sub.add_parser("run", help="the loop; what the scheduled task starts at logon")
+    p.add_argument("--verbose", action="store_true", help="debug logging")
+    p.set_defaults(func=cmd_agent_run)
+
+    p = ag_sub.add_parser("once", help="a single drain + digest pass, then exit")
+    p.add_argument("--no-digest", action="store_true", help="drain only")
+    p.add_argument(
+        "--force-digest",
+        action="store_true",
+        help="push the snapshot even if its version has not changed",
+    )
+    p.set_defaults(func=cmd_agent_once)
+
+    ag_sub.add_parser(
+        "status", help="can the agent reach the relay and the local API?"
+    ).set_defaults(func=cmd_agent_status)
+
+    p = ag_sub.add_parser("digest", help="build the offline snapshot and print it")
+    p.add_argument("--summary", action="store_true", help="sizes and counts, not the payload")
+    p.add_argument("--horizon", type=int, help="override digest_feedback_horizon")
+    p.set_defaults(func=cmd_agent_digest)
 
     return parser
 

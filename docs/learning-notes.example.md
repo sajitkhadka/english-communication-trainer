@@ -104,6 +104,22 @@ sessions, not the counts for any one of them — those live in the per-session f
 
 - _(nothing recorded yet)_
 
+## Word choice under pressure
+
+Reaching for a general-purpose word when a precise one exists - vague verbs, vague
+quantities, vague time commitments, hedges used as stalls. The trigger is usually
+retrieval: the precise word has not arrived, so a placeholder goes in.
+
+- _(none recorded yet)_
+
+## How answers end
+
+Endings are a separate skill from the rest of the answer and are often the weakest part -
+trailing into an intention instead of a status, skipping the closing ask, or grafting an
+orphaned fragment onto a sentence that already ran out.
+
+- _(none recorded yet)_
+
 ## What is working
 
 Things that have measurably improved. Worth keeping visible: it is the only part of

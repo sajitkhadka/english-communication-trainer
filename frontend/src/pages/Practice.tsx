@@ -2,14 +2,49 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api } from "../api";
-import Recorder from "../components/Recorder";
-import { Empty, ErrorBox, MODE_LABEL, StatusPill, formatDuration } from "../components/common";
-import { useAsync, useDocumentTitle } from "../hooks";
-import type { Mode, Session } from "../types";
+import Recorder, { type RecorderTarget } from "../components/Recorder";
+import RelayBar from "../components/RelayBar";
+import {
+  Empty,
+  ErrorBox,
+  MODE_LABEL,
+  StatusPill,
+  formatDate,
+  formatDuration,
+} from "../components/common";
+import { useAsync, useDocumentTitle, useInterval, useRelay } from "../hooks";
+import type { Mode, RemoteMode, Session } from "../types";
+
+/** The four modes that can be captured remotely - the ones that need no prior setup.
+ *  `recommended` and `interview` carry target words chosen by `/generate-topic`, which
+ *  is desk work by definition. */
+const REMOTE_MODES: { mode: RemoteMode; title: string; blurb: string }[] = [
+  {
+    mode: "worklog",
+    title: "Worklog",
+    blurb: "What you did today, decisions and why, hurdles, wins. No score.",
+  },
+  {
+    mode: "brainstorm",
+    title: "Brainstorm",
+    blurb: "Think out loud. Organised into ideas later - no coaching, no score.",
+  },
+  {
+    mode: "journal",
+    title: "Daily journal",
+    blurb: "Off the record. Transcribed for you, never sent to Claude.",
+  },
+  {
+    mode: "freeform",
+    title: "Free-form practice",
+    blurb: "Your own topic, no target words. Coached and scored.",
+  },
+];
 
 /** Home: pick up whatever is waiting to be recorded, or start a free-form session. */
 export default function Practice({ onQueueChange }: { onQueueChange: () => void }) {
   useDocumentTitle("Practice");
+  const relay = useRelay();
   const awaiting = useAsync(() => api.sessions({ status: "awaiting_recording" }), []);
   const recorded = useAsync(() => api.sessions({ status: "recorded" }), []);
   const [active, setActive] = useState<Session | null>(null);
@@ -19,9 +54,16 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
   const [creatingQuickMode, setCreatingQuickMode] = useState<Mode | null>(null);
   const [queueing, setQueueing] = useState<number | null>(null);
 
+  // Remote capture: no session exists yet, so the recorder is opened against a mode
+  // rather than an id, and the audio goes to the relay inbox (ADR 0006).
+  const [capturing, setCapturing] = useState<RemoteMode | null>(null);
+  const [captureTopic, setCaptureTopic] = useState("");
+  const [sent, setSent] = useState<string | null>(null);
+
   const reloadAll = () => {
     awaiting.reload();
     recorded.reload();
+    relay.refresh();
     onQueueChange();
   };
 
@@ -95,19 +137,162 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
   const waiting = awaiting.data ?? [];
   const readyToProcess = recorded.data ?? [];
 
+  // "Did it arrive?" has to be answerable from the phone that recorded it, not only
+  // from the relay's log.
+  const inbox = useAsync(
+    async () => (relay.isRelay ? api.inboxRecent() : { items: [] }),
+    [relay.isRelay],
+  );
+  const undrained = (inbox.data?.items ?? []).filter((item) => !item.acked_at);
+
+  // Reaching the PC is what turns a capture into a session, so this is only worth
+  // polling while something is actually in flight.
+  useInterval(
+    () => {
+      inbox.reload();
+      relay.refresh();
+    },
+    relay.isRelay && undrained.length > 0 ? 20000 : null,
+  );
+
+  // The desk-only cards create a session on the PC and then record into it - exactly
+  // the dependency remote capture exists to remove. The PC-backed lists stay, but only
+  // while the PC is actually up to serve them.
+  const showDeskCards = !relay.isRelay;
+  const showPcSections = !relay.isRelay || relay.pcOnline;
+
   return (
     <>
       <div className="page-head">
         <div>
           <h1>Practice</h1>
           <p>
-            Record against a topic, then queue it for Claude. Topics come from{" "}
-            <code>/generate-topic</code> in the console.
+            {relay.isRelay ? (
+              "Record from anywhere. Your PC picks it up and processes it when it is next awake."
+            ) : (
+              <>
+                Record against a topic, then queue it for Claude. Topics come from{" "}
+                <code>/generate-topic</code> in the console.
+              </>
+            )}
           </p>
         </div>
       </div>
 
+      <RelayBar status={relay.status} />
       <ErrorBox error={error} />
+
+      {relay.isRelay && (
+        <>
+          {capturing ? (
+            <div className="card">
+              <div className="card-head">
+                <h2>{REMOTE_MODES.find((m) => m.mode === capturing)?.title}</h2>
+                <button onClick={() => setCapturing(null)}>Cancel</button>
+              </div>
+              {capturing === "freeform" && (
+                <div className="field">
+                  <label htmlFor="capture-topic">Topic (optional)</label>
+                  <input
+                    id="capture-topic"
+                    value={captureTopic}
+                    placeholder="e.g. Explain our deployment process"
+                    onChange={(event) => setCaptureTopic(event.target.value)}
+                  />
+                </div>
+              )}
+              <Recorder
+                target={
+                  {
+                    kind: "inbox",
+                    mode: capturing,
+                    topic: captureTopic.trim() || null,
+                  } satisfies RecorderTarget
+                }
+                onUploaded={(result) => {
+                  setCapturing(null);
+                  setCaptureTopic("");
+                  setSent(result?.hint ?? "Saved on the server.");
+                  inbox.reload();
+                  relay.refresh();
+                }}
+              />
+            </div>
+          ) : (
+            <div className="card">
+              <div className="card-head">
+                <h2>Record</h2>
+                {undrained.length > 0 && (
+                  <span className="muted small">{undrained.length} waiting for your PC</span>
+                )}
+              </div>
+              <p className="card-sub">
+                Recordings are held on the server and become sessions the next time your
+                PC is up - nothing is lost if it is asleep right now.
+              </p>
+              {sent && <p className="notice">{sent}</p>}
+              <div className="capture-grid">
+                {REMOTE_MODES.map(({ mode, title, blurb }) => (
+                  <button
+                    key={mode}
+                    className="capture-tile"
+                    onClick={() => {
+                      setSent(null);
+                      setCapturing(mode);
+                    }}
+                  >
+                    <strong>{title}</strong>
+                    <span className="small">{blurb}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(inbox.data?.items.length ?? 0) > 0 && (
+            <div className="card">
+              <div className="card-head">
+                <h2>Sent from here</h2>
+                <span className="muted small">{undrained.length} waiting</span>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Recorded</th>
+                      <th>Mode</th>
+                      <th>Size</th>
+                      <th>State</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inbox.data?.items.map((capture) => (
+                      <tr key={capture.uid}>
+                        <td className="small">{formatDate(capture.created_at)}</td>
+                        <td className="small">{MODE_LABEL[capture.mode]}</td>
+                        <td className="num">{(capture.bytes / 1e6).toFixed(1)} MB</td>
+                        <td className="small">
+                          {capture.acked_at && capture.session_id ? (
+                            <Link to={`/session/${capture.session_id}`}>
+                              session {capture.session_id}
+                            </Link>
+                          ) : capture.last_error ? (
+                            <span className="muted" title={capture.last_error}>
+                              retrying ({capture.attempts})
+                            </span>
+                          ) : (
+                            <span className="muted">waiting for your PC</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {active && (
         <div className="card">
@@ -129,7 +314,7 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
             </p>
           )}
           <Recorder
-            sessionId={active.id}
+            target={{ kind: "session", sessionId: active.id }}
             onUploaded={() => {
               setActive(null);
               reloadAll();
@@ -138,64 +323,66 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
         </div>
       )}
 
-      <div className="card">
-        <div className="card-head">
-          <h2>Waiting to be recorded</h2>
-          <span className="muted small">{waiting.length}</span>
-        </div>
-        {waiting.length === 0 ? (
-          <Empty title="Nothing queued to record">
-            <p>
-              Run <code>/generate-topic</code> in the Claude Code console to get a topic
-              with target vocabulary, or start a free-form session below.
-            </p>
-          </Empty>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Topic</th>
-                  <th>Mode</th>
-                  <th>Target words</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {waiting.map((session) => (
-                  <tr key={session.id}>
-                    <td>
-                      <div className="session-row-topic">{session.topic ?? "(no topic)"}</div>
-                      <div className="session-row-meta">
-                        {session.category ?? "no category"} · session {session.id}
-                      </div>
-                    </td>
-                    <td className="small">{MODE_LABEL[session.mode]}</td>
-                    <td>
-                      {session.target_words.length === 0 ? (
-                        <span className="muted small">—</span>
-                      ) : (
-                        session.target_words.map((term) => (
-                          <span className="term" key={term}>
-                            {term}
-                          </span>
-                        ))
-                      )}
-                    </td>
-                    <td>
-                      <button className="primary" onClick={() => setActive(session)}>
-                        Record
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {showPcSections && (
+        <div className="card">
+          <div className="card-head">
+            <h2>Waiting to be recorded</h2>
+            <span className="muted small">{waiting.length}</span>
           </div>
-        )}
-      </div>
+          {waiting.length === 0 ? (
+            <Empty title="Nothing queued to record">
+              <p>
+                Run <code>/generate-topic</code> in the Claude Code console to get a topic
+                with target vocabulary, or start a free-form session below.
+              </p>
+            </Empty>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Topic</th>
+                    <th>Mode</th>
+                    <th>Target words</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {waiting.map((session) => (
+                    <tr key={session.id}>
+                      <td>
+                        <div className="session-row-topic">{session.topic ?? "(no topic)"}</div>
+                        <div className="session-row-meta">
+                          {session.category ?? "no category"} · session {session.id}
+                        </div>
+                      </td>
+                      <td className="small">{MODE_LABEL[session.mode]}</td>
+                      <td>
+                        {session.target_words.length === 0 ? (
+                          <span className="muted small">—</span>
+                        ) : (
+                          session.target_words.map((term) => (
+                            <span className="term" key={term}>
+                              {term}
+                            </span>
+                          ))
+                        )}
+                      </td>
+                      <td>
+                        <button className="primary" onClick={() => setActive(session)}>
+                          Record
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
-      {readyToProcess.length > 0 && (
+      {showPcSections && readyToProcess.length > 0 && (
         <div className="card">
           <div className="card-head">
             <h2>Recorded, not yet queued</h2>
@@ -256,90 +443,94 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
         </div>
       )}
 
-      <div className="card">
-        <div className="card-head">
-          <h2>Free-form practice</h2>
-        </div>
-        <p className="card-sub">
-          Your own topic, no target words. Leave it blank to just talk.
-        </p>
-        <div className="field">
-          <label htmlFor="topic">Topic (optional)</label>
-          <input
-            id="topic"
-            value={topic}
-            placeholder="e.g. Explain our deployment process to a new joiner"
-            onChange={(event) => setTopic(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void startFreeform();
-            }}
-          />
-        </div>
-        <div className="btn-row" style={{ marginTop: "0.85rem" }}>
-          <button className="primary" onClick={startFreeform} disabled={creating}>
-            {creating ? "Creating…" : "Start free-form session"}
-          </button>
-        </div>
-      </div>
+      {showDeskCards && (
+        <>
+          <div className="card">
+            <div className="card-head">
+              <h2>Free-form practice</h2>
+            </div>
+            <p className="card-sub">
+              Your own topic, no target words. Leave it blank to just talk.
+            </p>
+            <div className="field">
+              <label htmlFor="topic">Topic (optional)</label>
+              <input
+                id="topic"
+                value={topic}
+                placeholder="e.g. Explain our deployment process to a new joiner"
+                onChange={(event) => setTopic(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void startFreeform();
+                }}
+              />
+            </div>
+            <div className="btn-row" style={{ marginTop: "0.85rem" }}>
+              <button className="primary" onClick={startFreeform} disabled={creating}>
+                {creating ? "Creating…" : "Start free-form session"}
+              </button>
+            </div>
+          </div>
 
-      <div className="card">
-        <div className="card-head">
-          <h2>Worklog</h2>
-        </div>
-        <p className="card-sub">
-          Ten minutes on your day: what you did, decisions and why, hurdles, wins,
-          what&apos;s next. Missed a day or two? Talk through all of them in one
-          recording — <code>/log-work</code> splits it into one entry per day. No
-          score.
-        </p>
-        <div className="btn-row">
-          <button
-            className="primary"
-            onClick={() => startQuick("worklog")}
-            disabled={creatingQuickMode !== null}
-          >
-            {creatingQuickMode === "worklog" ? "Creating…" : "Record worklog"}
-          </button>
-        </div>
-      </div>
+          <div className="card">
+            <div className="card-head">
+              <h2>Worklog</h2>
+            </div>
+            <p className="card-sub">
+              Ten minutes on your day: what you did, decisions and why, hurdles, wins,
+              what&apos;s next. Missed a day or two? Talk through all of them in one
+              recording — <code>/log-work</code> splits it into one entry per day. No
+              score.
+            </p>
+            <div className="btn-row">
+              <button
+                className="primary"
+                onClick={() => startQuick("worklog")}
+                disabled={creatingQuickMode !== null}
+              >
+                {creatingQuickMode === "worklog" ? "Creating…" : "Record worklog"}
+              </button>
+            </div>
+          </div>
 
-      <div className="card">
-        <div className="card-head">
-          <h2>Brainstorm</h2>
-        </div>
-        <p className="card-sub">
-          Think out loud about anything - no structure needed.{" "}
-          <code>/process-brainstorm</code> organises it into ideas — no coaching, no score.
-        </p>
-        <div className="btn-row">
-          <button
-            className="primary"
-            onClick={() => startQuick("brainstorm")}
-            disabled={creatingQuickMode !== null}
-          >
-            {creatingQuickMode === "brainstorm" ? "Creating…" : "Start a brainstorm"}
-          </button>
-        </div>
-      </div>
+          <div className="card">
+            <div className="card-head">
+              <h2>Brainstorm</h2>
+            </div>
+            <p className="card-sub">
+              Think out loud about anything - no structure needed.{" "}
+              <code>/process-brainstorm</code> organises it into ideas — no coaching, no score.
+            </p>
+            <div className="btn-row">
+              <button
+                className="primary"
+                onClick={() => startQuick("brainstorm")}
+                disabled={creatingQuickMode !== null}
+              >
+                {creatingQuickMode === "brainstorm" ? "Creating…" : "Start a brainstorm"}
+              </button>
+            </div>
+          </div>
 
-      <div className="card">
-        <div className="card-head">
-          <h2>Daily journal</h2>
-        </div>
-        <p className="card-sub">
-          Family, goals, whatever&apos;s on your mind — off the record. Transcribed for
-          your own reading, but never sent to Claude and never scored.
-        </p>
-        <div className="btn-row">
-          <button
-            className="primary"
-            onClick={() => startQuick("journal")}
-            disabled={creatingQuickMode !== null}
-          >
-            {creatingQuickMode === "journal" ? "Creating…" : "Record today's journal"}
-          </button>
-        </div>
-      </div>
+          <div className="card">
+            <div className="card-head">
+              <h2>Daily journal</h2>
+            </div>
+            <p className="card-sub">
+              Family, goals, whatever&apos;s on your mind — off the record. Transcribed for
+              your own reading, but never sent to Claude and never scored.
+            </p>
+            <div className="btn-row">
+              <button
+                className="primary"
+                onClick={() => startQuick("journal")}
+                disabled={creatingQuickMode !== null}
+              >
+                {creatingQuickMode === "journal" ? "Creating…" : "Record today's journal"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }

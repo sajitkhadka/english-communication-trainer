@@ -86,9 +86,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
     schema.sql after a DB already exists needs its own `ALTER TABLE` here (see
     CLAUDE.md). Guarded so a DB that already has the column is a no-op."""
     existing = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
-    for column in ("title", "summary"):
+    for column in ("title", "summary", "external_uid"):
         if column not in existing:
             conn.execute(f"ALTER TABLE sessions ADD COLUMN {column} TEXT")
+    # The index carries the uniqueness `ALTER TABLE ... ADD COLUMN ... UNIQUE` cannot.
+    # schema.sql creates the same index, so both paths end up identical.
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_external_uid ON sessions(external_uid)"
+    )
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -118,10 +123,12 @@ def create_session(
     target_words: list[str] | None = None,
     status: str = "awaiting_recording",
     notes: str | None = None,
+    external_uid: str | None = None,
 ) -> int:
     cur = conn.execute(
-        """INSERT INTO sessions (mode, category, topic, target_words, status, created_at, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO sessions
+             (mode, category, topic, target_words, status, created_at, notes, external_uid)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             mode,
             category,
@@ -130,9 +137,21 @@ def create_session(
             status,
             utcnow(),
             notes,
+            external_uid,
         ),
     )
     return int(cur.lastrowid)
+
+
+def get_session_by_external_uid(
+    conn: sqlite3.Connection, external_uid: str
+) -> dict[str, Any] | None:
+    """Look a session up by the id the recorder minted (see schema.sql).
+
+    The lookup that makes a re-drain a no-op instead of a duplicate session.
+    """
+    row = conn.execute("SELECT * FROM sessions WHERE external_uid = ?", (external_uid,)).fetchone()
+    return hydrate_session(row) if row else None
 
 
 def get_session(conn: sqlite3.Connection, session_id: int) -> dict[str, Any] | None:

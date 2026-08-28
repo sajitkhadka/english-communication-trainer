@@ -15,7 +15,7 @@ All commands run from the `backend/` directory.
 ```bash
 cd backend
 uv run ect vocab due --limit 15     # words needing review + corpus stats
-uv run ect vocab gaps --limit 20    # active vs. passive: recognised but never produced
+uv run ect vocab gaps --limit 20 --brief   # active vs. passive: recognised but never produced
 uv run ect requests list            # topic requests raised from the frontend
 ```
 
@@ -24,6 +24,13 @@ Then read `data/profile.md` in full (repo root, not `backend/data/` - commands r
 must connect to this user's actual role, stack, employer, and interests. If the profile
 is still a template with no real facts in it, say so in your final message and pick a
 topic that suits a generic mid-level software engineer.
+
+Its last section, ***Language gaps to target***, is one line per live weakness and is the
+half of the file that aims the topic: a good prompt makes the user walk into a known gap
+on purpose. It is deliberately summary-only - the evidence and the fix live in the notes,
+and it is kept short because this file is read in full every time
+(`docs/adr/0007-profile-holds-identity-notes-hold-language.md`). **Do not add to it here**;
+`/process-session` maintains it.
 
 Skim `data/learning-notes.md` too - specifically *Sentence patterns* and *Phrases and
 connectors to activate*. It is the record of what has already been coached, and it is

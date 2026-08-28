@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25'
+          cache-dependency-path: relay/go.sum
+      # gofmt exits 0 whatever it finds and just lists files, so the check has to be
+      # "did it name anything" rather than its exit code.
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"; echo "$unformatted"; exit 1
+          fi
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./...
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      # `npm run build` runs tsc -b then Vite; typecheck first so a type error is
+      # reported as one rather than as a build failure. There is no test suite here.
+      - run: npm run typecheck
+      - run: npm run build
+
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      # Exact version, not a floating major: astral-sh/setup-uv publishes no `v10`
+      # tag, only `v10.0.1`. CI caught this as "unable to find version v10".
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # NOT `uv sync --extra dev`, and this is the whole reason CI takes seconds
+      # instead of minutes.
+      #
+      # pyproject pulls torch and torchaudio from the CUDA 12.6 wheel index; with
+      # whisperx and onnx-asr behind them that is several GB of CUDA runtime on every
+      # run. None of it is needed here: torch, whisperx and silero are imported inside
+      # the functions that use them (see CLAUDE.md), the analysis layer takes plain
+      # Word/Span values rather than touching audio, and the tests stub
+      # `pipeline.runner.run`. The full suite passes with none of it installed.
+      #
+      # The cost of the shortcut is that this list can drift from pyproject. It fails
+      # loudly rather than silently when it does: a new runtime dependency used on any
+      # tested path shows up as ModuleNotFoundError here. A dependency used only in the
+      # GPU paths would not be caught - but nothing catches those without a GPU anyway.
+      - name: Install the non-GPU dependencies
+        run: |
+          uv venv
+          uv pip install \
+            "fastapi>=0.115" "uvicorn[standard]>=0.32" "python-multipart>=0.0.12" \
+            "pydantic>=2.9" "pydantic-settings>=2.6" "numpy>=1.26" "soundfile>=0.12" \
+            "httpx>=0.27" "pytest>=8.3" "ruff>=0.7"
+
+      - name: Lint
+        run: |
+          uv run --no-project ruff check .
+          uv run --no-project ruff format --check .
+
+      - name: Tests
+        run: uv run --no-project pytest -q

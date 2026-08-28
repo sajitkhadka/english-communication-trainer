@@ -49,6 +49,19 @@ def _ffmpeg_present() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
+@router.get("/digest")
+def digest(horizon: int | None = None) -> Any:
+    """The offline snapshot `ect agent` mirrors to the relay (ADR 0006, app/digest.py).
+
+    Assembled here rather than in the agent so the agent needs no database access and
+    no knowledge of the schema: it fetches this, compares `version` with what it last
+    pushed, and forwards it only when that moved.
+    """
+    from ..digest import build_digest
+
+    return build_digest(feedback_horizon=horizon)
+
+
 @router.get("/queue")
 def queue() -> Any:
     """Sessions waiting on a Claude run (PRD 6.3, Phase 2 queue view)."""

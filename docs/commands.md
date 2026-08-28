@@ -150,7 +150,7 @@ uv run ect doctor       # CUDA, VRAM, ctranslate2, ffmpeg, db, profile. Exit 1 i
 
 ```bash
 uv run ect vocab due --limit 15
-uv run ect vocab gaps --limit 30 [--kind idiom]    # active vs. passive vocabulary
+uv run ect vocab gaps --limit 30 [--kind idiom] [--brief]   # active vs. passive vocabulary
 uv run ect vocab list --sort mastery --limit 30    # recency|frequency|mastery|alpha|due
 uv run ect vocab stats
 uv run ect vocab add --json '[{"term":"de-risk","kind":"word","meaning":"…","example":"…"}]'
@@ -168,6 +168,14 @@ maintains — no new state, no judgement:
 | `dormant` | carried as a target at least once and **never** produced correctly — passive vocabulary, and the highest-value thing to practise |
 | `shaky` | produced sometimes, under half the time |
 | `untried` | never carried by a session; no evidence either way |
+
+`--brief` drops `example`, `due_date`, `interval_days`, `source` and `id` from each term,
+keeping `term`, `kind`, `meaning`, `notes` and the usage counters — about 40% fewer tokens
+for the same decision. `/process-session` and `/generate-topic` use it, because they only
+need to judge whether a dormant term had a slot; the SM-2 fields are bookkeeping the
+backend acts on and the model never reads. `/vocab-review` deliberately uses the full
+report — that one is written for you, not for Claude, and the examples and due dates are
+the point.
 
 Plus `activation_rate` overall and per `kind`, weakest kind first — idioms and phrases
 typically lag single words, which is the finding the raw due list hides. `dormant` is
@@ -347,6 +355,102 @@ never calls `brief` at all — see the Journal section above.
 
 ---
 
+## The recording archive
+
+```bash
+./backup-recordings.ps1                       # the whole thing: track, copy, verify, mark
+./backup-recordings.ps1 -DryRun               # show what would move, change nothing
+```
+
+That script is the day-to-day command. It needs `-Remote` (an rclone remote and path) and
+`-SshTarget` (user@host, for the verify step), or the equivalent `ECT_ARCHIVE_REMOTE` /
+`ECT_ARCHIVE_SSH` environment variables. Underneath it:
+
+```bash
+uv run ect archive status                     # table; --json for the machine-readable form
+uv run ect archive track [--rehash]           # hash recordings and record them
+uv run ect archive manifest --format sha256 --out data/recordings/.manifest.sha256
+uv run ect archive verify [--deep]            # disk vs. what was recorded; --deep re-hashes
+uv run ect archive synced --target homeserver:/srv/ect [--session 21 22]
+uv run ect archive compress [--bitrate 24] [--drop-original]    # optional, see below
+```
+
+Recordings are **not** in the data repo — see
+`docs/adr/0008-recordings-out-of-git.md`. They were 102 MB against 1.8 MB for everything
+else, and git cannot shed that later without a rewrite. Leaving git removed the inventory
+as much as the storage, so `track` is what replaces `git status`: it hashes each recording
+into `recording_archives`, which is the only thing that can later say a file is still here
+and still itself. Cheap to re-run — an unchanged size is skipped, so it costs one `stat`
+per session, not a re-read of 100 MB. `--rehash` forces the full read.
+
+`status` shows, per session, whether the file is `present`, whether it is `tracked`, which
+copy exists (`original` / `archive`), and when it was last confirmed off this machine. An
+untracked recording prints `NO` rather than looking fine — that is the quiet failure this
+exists to prevent.
+
+**`synced` is a separate, explicit command and nothing sets it automatically.** A transfer
+exiting 0 means a transfer started and did not error; it does not mean the bytes arrived
+intact. Since "a copy exists off this machine" is the claim that licenses deleting a local
+file, it is recorded by whatever actually checked — which is why the script runs
+`sha256sum -c` on the server over SSH before it calls this.
+
+Moving the bytes is deliberately not `ect`'s job: `rclone copy` handles resumption and
+partial transfers better than anything worth writing here, and `manifest --format sha256`
+makes the far end checkable with plain coreutils. `copy`, not `sync` — the far end is an
+archive, so a file deleted here must never be deleted there.
+
+`compress` is **optional and off by default.** It transcodes to mono Opus at speech
+bitrate (5.4x measured; MediaRecorder writes a flat 129 kbps whatever the content), but
+the recordings exist to be listened back to, and that is precisely what a lossy-to-lossy
+re-encode degrades. It is there for when disk pressure changes the trade.
+
+---
+
+## Remote capture (`ect agent`)
+
+Only relevant once the relay is deployed — with `ECT_RELAY_URL` unset none of this runs
+and nothing else changes. Full setup and troubleshooting: [relay.md](relay.md).
+
+```bash
+uv run ect agent status              # can it reach the relay and the local API?
+uv run ect agent once                # one drain + digest pass, then exit
+uv run ect agent once --no-digest    # drain only
+uv run ect agent once --force-digest # push the snapshot even if unchanged
+uv run ect agent run                 # the loop; what the scheduled task starts at logon
+uv run ect agent run --verbose       # ... with debug logging
+uv run ect agent digest --summary    # sizes and counts, without printing the payload
+uv run ect agent digest              # the whole snapshot, as the relay would serve it
+```
+
+`ect agent once` is the command for "I recorded something on my phone and it never
+turned up". One pass, and it prints what it drained, skipped and failed:
+
+```json
+{
+  "heartbeat": { "ok": true, "inbox_pending": 1 },
+  "drained": [
+    { "uid": "…", "session_id": 42, "mode": "worklog", "status": "recorded",
+      "transcription": { "status": "transcribed", "words": 412 } }
+  ],
+  "skipped": [], "failed": [],
+  "counts": { "drained": 1, "skipped": 0, "failed": 0 },
+  "digest": { "pushed": true, "version": "789db3643ba31086", "sessions": 42 }
+}
+```
+
+Every step is safe to repeat. `sessions.external_uid` — the id the *recorder* minted —
+makes session creation idempotent, re-storing audio is an overwrite, and transcription
+is a no-op once a transcript exists. An ack lost on the wire costs one repeated pass,
+never a duplicate session.
+
+A drained recording stops at `recorded`. The agent never enqueues: you still press
+"Ready for AI processing" and run the skill yourself, exactly as
+[ADR 0003](adr/0003-queue-based-frontend-to-claude-handoff.md) intended. `journal` is
+the free exception — it finalises itself at transcription, so one recorded on the
+commute is complete before you sit down.
+
+---
+
 ## Running the server
 
 ```bash
@@ -357,4 +461,8 @@ cd frontend && npm run dev                                       # http://localh
 Useful endpoints: `GET /api/health`, `GET /api/doctor`, `GET /api/queue`,
 `POST /api/sessions/{id}/transcribe` (transcribe only), `POST /api/sessions/{id}/process`
 (`?transcribe=false` to queue an already-transcribed session without re-running the GPU
-pipeline), `PATCH /api/sessions/{id}/mode`, `GET /api/sessions/{id}/brief`.
+pipeline), `PATCH /api/sessions/{id}/mode`, `GET /api/sessions/{id}/brief`,
+`GET /api/digest` (the offline snapshot `ect agent` mirrors to the relay).
+
+`./dev.ps1` binds loopback unless `ECT_HOST` says otherwise — see
+[relay.md](relay.md) before moving it, because the API is unauthenticated.

@@ -16,6 +16,9 @@ dependencies = [
     "whisperx>=3.4",
     "silero-vad>=5.1",
     "onnx-asr[gpu,hub]>=0.12.0",
+    # `ect agent` drives the *local HTTP API* rather than importing `services` (see
+    # app/agent.py), so an HTTP client is a runtime dependency, not just a test one.
+    "httpx>=0.27",
 ]
 
 [project.scripts]

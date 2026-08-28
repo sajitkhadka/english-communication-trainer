@@ -901,11 +901,81 @@ td.num {
   color: #fff;
 }
 
+/* ------------------------------------------------------------------ relay */
+/* Only rendered when the page is served by the relay (ADR 0006). The offline
+   variant has to be unmissable: with the PC asleep the rows on screen come from a
+   snapshot, and showing them as if they were live is the one genuinely dishonest
+   thing this design could do. */
+
+.relay-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.65rem 0.9rem;
+  margin-bottom: 1rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+.relay-bar.online {
+  background: var(--wash);
+  border-left: 3px solid var(--series-1);
+  color: var(--text-secondary);
+}
+.relay-bar.offline {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border-left: 3px solid var(--warning);
+  color: var(--text-primary);
+}
+.relay-dot {
+  flex: none;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-top: 0.45rem;
+  border-radius: 50%;
+}
+.relay-dot.online {
+  background: var(--good);
+}
+.relay-dot.offline {
+  background: var(--warning);
+}
+
+/* Big tap targets: this grid is the whole interface on a phone. */
+.capture-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.7rem;
+}
+.capture-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  align-items: flex-start;
+  text-align: left;
+  padding: 0.85rem 0.9rem;
+  min-height: 5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+.capture-tile:hover {
+  border-color: var(--series-1);
+}
+.capture-tile span {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
 @media (max-width: 620px) {
   main {
     padding: 1rem 0.85rem 3rem;
   }
   .tile .value {
     font-size: 1.35rem;
+  }
+  .capture-grid {
+    grid-template-columns: 1fr;
   }
 }

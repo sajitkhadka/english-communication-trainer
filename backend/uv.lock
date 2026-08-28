@@ -306,6 +306,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "numpy" },
     { name = "onnx-asr", extra = ["gpu", "hub"] },
     { name = "pydantic" },
@@ -329,6 +330,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "onnx-asr", extras = ["gpu", "hub"], specifier = ">=0.12.0" },

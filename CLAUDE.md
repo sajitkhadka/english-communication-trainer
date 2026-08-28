@@ -36,6 +36,14 @@ It passes `ECT_API_PORT` to Vite, so `-Port` moves both halves together.
 Frontend (`frontend/`): `npm run typecheck` (strict, `noUnusedLocals`), `npm run build`
 (runs `tsc -b` then Vite). There is no frontend test suite.
 
+```bash
+# remote capture (ADR 0006) - only if the relay is deployed
+uv run ect agent status              # can it reach the relay and the local API?
+uv run ect agent once                # one drain + digest pass; what to run when a
+                                     # phone recording "did not arrive"
+cd ../relay && go test ./...         # the relay's own suite: no cluster, no GPU
+```
+
 `ect doctor` first when anything GPU-shaped misbehaves — it reports `vram_free_gb` and
 the registered DLL directories, which is usually the whole answer.
 
@@ -89,6 +97,31 @@ dump rewards performing over reporting (PRD-worklog 5.1), so each has its own wr
 rather than inserting a meaningless row. `journal` never reaches any write path — see
 below.
 
+**4. Remote capture goes through the relay's inbox, never straight into the DB.**
+`ect agent` (`app/agent.py`) drains recordings captured on a phone by driving the
+**local HTTP API** - `POST /api/sessions`, `/recording`, `/transcribe` - and never
+imports `services`. That is a correctness requirement, not layering taste:
+`services._gpu_lock` is a `threading.Lock`, so it only guards one process, and two
+processes each loading `large-v3` do not fit in 6 GB and take the worker down natively.
+Driving the API keeps every WhisperX load inside the one uvicorn process where the lock
+means something. The agent needs no torch, no CUDA and no `pipeline` import at all.
+
+`sessions.external_uid` is what makes that safe to repeat: the *recorder* mints the id,
+so a retried upload and a re-drained item both collapse into the same session
+(`create_session` returns the existing row). A drained recording stops at `recorded` -
+ADR 0003 stands, and arriving over the network does not change it. `journal` is the free
+exception, because it finalises itself at transcription.
+
+The agent's routes live under `/agent/`, not `/api/`, and that is a deployment
+constraint rather than taste: the recorder is behind an ingress basic-auth annotation,
+and a request carries one `Authorization` header, so a `Bearer` token on an `/api/`
+path is rejected before the relay sees it. The `/agent/` prefix is what a second,
+auth-free Ingress can exempt without also exposing the browser's own inbox routes or
+the digest.
+
+The whole thing is optional: with `ECT_RELAY_URL` unset, nothing above runs and the app
+is exactly what it was. See `docs/relay.md` and `docs/adr/0006-…`.
+
 ### Two independent audio layers
 
 `pipeline/transcribe.py` (WhisperX + wav2vec2 forced alignment) and `pipeline/vad.py`
@@ -141,21 +174,41 @@ must never reach Claude, by design.
   relative `data/…` in a skill resolves to `backend/data/` — always let the backend
   resolve paths (`ect feedback apply --markdown …`) rather than writing into `data/`.
 - **The live profile is `data/profile.md`, not `docs/profile.md`** as PRD §7.1 sketches.
-  It accumulates employer, projects and weaknesses, and the repo is pushed to GitHub, so
+  It accumulates employer, projects and interests, and the repo is pushed to GitHub, so
   it is personal state: gitignored, backed up with the rest of `data/`, and seeded from
   the tracked `docs/profile.example.md` by `paths.seed_profile` (which never overwrites).
+  **It is append-only except for its last section.** *Language gaps to target* is a
+  consolidated one-line-per-gap summary; PRD §7.1's blanket "additive edits only" no
+  longer holds for it, and `/process-session` deletes a line there when a gap is fixed.
+  *Current work* stays additive but is grouped by project, not by session — a new fact
+  joins its project's bullet. See `docs/adr/0007-…`: the file is read *in full* on every
+  `/generate-topic` run, so an append-only section restating one weakness per session
+  costs its full price every run.
 - **`data/learning-notes.md` is a second, separate hand-edited file** on the same
   contract (gitignored, seeded from `docs/learning-notes.example.md` by
-  `paths.seed_notes`). It holds the durable coaching record — sentence patterns,
-  phrases being activated, recurring corrections — and it is **not** folded into the
-  profile on purpose: the profile is read in full on every `/generate-topic` run and
-  has to stay short, while the notes are meant to grow. The split is *who is speaking*
-  vs. *what has already been taught*. Unlike the profile it is consolidated rather than
-  append-only; `/process-session` prunes and merges it as well as adding to it. It is
+  `paths.seed_notes`). It holds the durable coaching record and **owns all the language
+  detail** — sentence patterns, phrases being activated, recurring corrections, delivery
+  habits, word choice, how answers end, what is working. It is **not** folded into the
+  profile on purpose: the profile is read in full on every `/generate-topic` run and has
+  to stay short, while the notes are meant to grow. The split is *who is speaking*
+  (profile) vs. *what has already been taught* (notes); a weakness appears in both only
+  as one summary line there and the full entry here. Unlike the rest of the profile it is
+  consolidated rather than append-only; `/process-session` prunes and merges it as well as
+  adding to it — which is safe because `data/feedback/<id>.md` is the immutable per-session
+  record underneath both files. It is
   the one file both Claude and the frontend write to (the Notes page, `GET`/`PUT
   /api/notes`), so a save carries the `version` it loaded and 409s rather than
   overwriting a newer one — see `services.write_notes`. Skills still edit the file
   directly rather than through `ect`, same as the profile.
+- **Recordings are not in the data repo, and `ect archive` is what tracks them.** They
+  were 102 MB against 1.8 MB for everything else, so `data/.gitignore` excludes the audio
+  (ADR 0008). That means `git status` no longer answers "is this file still here and still
+  itself" - `ect archive track` hashes each recording into `recording_archives`, and
+  `./backup-recordings.ps1` copies them to the home server over rclone/sftp and confirms
+  with `sha256sum -c` before recording `synced_at`. **Nothing sets `synced_at`
+  automatically**: a transfer exiting 0 is not evidence the bytes arrived, and that flag is
+  what would later license deleting a local copy. Originals are kept; `archive compress`
+  exists but is opt-in, because the recordings are for listening back to.
 - **Audio decoding goes through ffmpeg** (`pipeline/audio.py`), never torchaudio — the
   browser uploads webm/opus or mp4, and the installed torchcodec backend does not work
   on Windows. A `torchcodec` import warning is expected and harmless.
@@ -168,6 +221,16 @@ must never reach Claude, by design.
   explicit `ALTER TABLE`. Columns beyond PRD §7.2 are marked `ADDITIVE`.
 - **Skills live in `.claude/skills/<name>/SKILL.md`**, not `skills/` as the PRD sketches.
   Claude Code only discovers them there.
+- **The digest is derived, one-way, and never written by the relay** (`app/digest.py`).
+  It is what the relay serves while the PC is off. Keeping it read-only is what keeps
+  `services.write_notes`'s version/409 contract a local concern instead of a distributed
+  one. It carries no audio, no transcripts and no per-word timings by construction - if
+  you add something the offline UI needs, add it to `build_digest` *and* to the relay's
+  route table in `relay/digest.go`, or the relay will 503 a route that now has data.
+- **`services.decorate_session` is shared by the API and the digest builder** on
+  purpose: the relay serves those rows verbatim, so a `has_*` flag computed differently
+  in the two places shows up as the UI disagreeing with itself depending on which side
+  answered.
 - **Frontend colors come from CSS custom properties** in `src/styles.css` (a
   CVD-validated palette with separately chosen light and dark steps). Components
   reference `var(--series-1)` etc. — do not hard-code hex in a component.
@@ -194,4 +257,6 @@ It touches six places, and missing one produces a silently wrong `overall`:
 - `docs/commands.md` — every skill and `ect` command, with payload shapes
 - `docs/rubric.md` — scoring anchors; read before scoring anything
 - `docs/setup.md` — prerequisites, VRAM ladder, config env vars, troubleshooting
+- `docs/relay.md` — remote capture: the relay, `ect agent`, and how to run both
+- `relay/README.md` — the Go switchboard itself; manifests live in the `k8s-config` repo
 - `docs/adr/` — the load-bearing decisions and the alternatives rejected

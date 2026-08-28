@@ -87,3 +87,40 @@ def to_wav(src: Path | str, dest: Path | str, sr: int = SAMPLE_RATE) -> Path:
         tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-4:]
         raise AudioError(f"ffmpeg failed to transcode {Path(src).name}: {' | '.join(tail)}")
     return dest
+
+
+def transcode_opus(
+    src: Path | str,
+    dest: Path | str,
+    *,
+    bitrate_kbps: int = 24,
+) -> Path:
+    """Re-encode speech to low-bitrate mono Opus for archival.
+
+    MediaRecorder hands us Opus at a flat ~129 kbps regardless of content, which is
+    roughly five times what mono speech needs. This is a lossy-to-lossy re-encode, so
+    it is only ever applied to the *archive* copy - the transcript and every metric in
+    `pipeline/metrics.py` are already computed from the original, and nothing
+    downstream re-derives them from here.
+
+    `-application voip` tunes libopus for a single speaking voice rather than music,
+    which is what makes 24 kbps listenable instead of merely intelligible.
+    """
+    src, dest = Path(src), Path(dest)
+    if not src.is_file():
+        raise AudioError(f"audio file not found: {src}")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        _ffmpeg(), "-v", "error", "-y", "-i", str(src),
+        "-c:a", "libopus", "-b:a", f"{bitrate_kbps}k", "-ac", "1",
+        "-application", "voip", str(dest),
+    ]  # fmt: skip
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0 or not dest.is_file():
+        raise AudioError(f"ffmpeg could not transcode {src.name}: {proc.stderr.strip()[:300]}")
+    # A transcode that produced a file we cannot read back is worse than no archive at
+    # all, because it invites deleting the original against a corrupt copy.
+    if duration_of(dest) is None:
+        dest.unlink(missing_ok=True)
+        raise AudioError(f"transcoded {src.name} but the result would not decode")
+    return dest

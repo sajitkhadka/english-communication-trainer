@@ -33,6 +33,22 @@ identical no matter how many times you rerun a session.
 The frontend never calls Claude. It flags intent; you pull the trigger in the console
 ([ADR 0003](docs/adr/0003-queue-based-frontend-to-claude-handoff.md)).
 
+## Recording away from the desk
+
+The microphone and the GPU want to be in different places. A small relay on a home
+server holds an inbox of recordings made on a phone, and `ect agent` on the PC drains
+them into real sessions whenever the PC is next awake — so the sessions most worth
+having are the ones the desk cannot take: the worklog on the commute, the brainstorm on
+a walk, the journal entry away from home.
+
+The PC stays required for everything except capture and reading history. That ceiling is
+deliberate: the system degrades to "record and browse", never to nothing, and never to
+"silently processed by something else."
+
+Optional — with `ECT_RELAY_URL` unset none of it runs. Setup and troubleshooting:
+[docs/relay.md](docs/relay.md); the reasoning:
+[ADR 0006](docs/adr/0006-remote-capture-local-processing.md).
+
 ## Quick start
 
 ```bash
@@ -99,10 +115,12 @@ thousand.
 
 ```
 backend/          FastAPI app, WhisperX/Silero pipeline, SQLite, the `ect` CLI
-  app/            config, db, srs, services, routers, brief, cli
+  app/            config, db, srs, services, routers, brief, digest, agent, cli
   pipeline/       audio, transcribe, vad, fillers, metrics, runner
-  tests/          165 tests, no GPU required
+  tests/          225 tests, no GPU required
 frontend/         React + TypeScript (Vite)
+relay/            Go: the remote-capture switchboard (ADR 0006). Deploys to the home
+                  server; its k8s manifests live in the k8s-config repo.
 .claude/skills/   generate-topic, process-session, vocab-review, log-work, process-brainstorm
 data/             recordings, transcripts, feedback, prompts, worklog, brainstorm,
                   profile.md, learning-notes.md, app.db                 (gitignored)
@@ -115,14 +133,19 @@ Two notes where this differs from the PRD's sketch:
 - Skills live in `.claude/skills/` rather than `skills/`, because that is where Claude
   Code discovers them. A skill in `skills/` would never load.
 - The `sessions` and `words` tables carry a few additive columns beyond PRD §7.2
-  (`repetitions` for SM-2, `transcribe_status` for the GPU stage, `notes`). Each is
-  marked `ADDITIVE` in [backend/app/schema.sql](backend/app/schema.sql).
+  (`repetitions` for SM-2, `transcribe_status` for the GPU stage, `notes`,
+  `external_uid` for remote capture). Each is marked `ADDITIVE` in
+  [backend/app/schema.sql](backend/app/schema.sql).
+- `relay/` is in this repo but deploys to a different host, and is the one part written
+  in Go. [ADR 0006](docs/adr/0006-remote-capture-local-processing.md) records why it is
+  not its own repository.
 
 ## Testing
 
 ```bash
-cd backend && uv run pytest -q     # 165 tests, no GPU or model download needed
+cd backend && uv run pytest -q     # 225 tests, no GPU or model download needed
 cd frontend && npm run build       # typecheck + production build
+cd relay   && go test ./...        # 26 tests, no cluster or PC needed
 ```
 
 The analysis layer takes plain word and VAD values rather than reaching for the audio
