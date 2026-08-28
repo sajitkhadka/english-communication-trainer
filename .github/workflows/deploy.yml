@@ -1,0 +1,125 @@
+name: Deploy relay
+
+# Builds the relay image and records the new tag in the k8s-config repo. It does not
+# talk to the cluster: Argo CD owns what is running, and this workflow's job is to
+# change the desired state in git. Same shape as sync-todo's deploy workflow, and for
+# the same reason - a tag written straight into the cluster with `kubectl set image`
+# exists nowhere in git, so Argo CD reports permanent drift and reverts it on the next
+# sync.
+#
+# Pushing a tag stages a release; it does not ship it. Argo CD is on manual sync, so
+# ect-relay shows OutOfSync until someone syncs it.
+#
+# Only the relay is built here. The backend and frontend run on the PC from a git
+# checkout, not from an image - that is the whole point of ADR 0006's split, and there
+# is nothing to deploy for them.
+
+on:
+  push:
+    tags:
+      - 'relay-v*.*.*'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why this manual run'
+        required: false
+
+env:
+  REGISTRY: 192.168.0.120:5000
+  IMAGE: ect-relay
+  MANIFEST: ect-relay/ect-relay-deployment.yaml
+
+# Two tags pushed close together would otherwise race on the push to k8s-config.
+concurrency:
+  group: ect-relay-deploy-manifests
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    # Self-hosted: the registry is on the LAN at a private address, and it is plain
+    # HTTP, so it is reachable and trusted only from inside the network.
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      # Build context is the repo root, not relay/: the same Dockerfile builds the
+      # frontend, so the relay always serves the exact build this commit produces.
+      - name: Build and push
+        run: |
+          set -euo pipefail
+          docker build -f relay/Dockerfile \
+            -t "$REGISTRY/$IMAGE:${{ github.sha }}" \
+            -t "$REGISTRY/$IMAGE:latest" \
+            .
+          docker push "$REGISTRY/$IMAGE:${{ github.sha }}"
+          docker push "$REGISTRY/$IMAGE:latest"
+
+  update-manifests:
+    needs: build-and-push
+    runs-on: self-hosted
+    steps:
+      # Write access to k8s-config comes from a deploy key scoped to that one repo,
+      # not a PAT, which would carry the whole account.
+      - uses: actions/checkout@v4
+        with:
+          repository: sajitkhadka/k8s-config
+          ssh-key: ${{ secrets.K8S_CONFIG_DEPLOY_KEY }}
+          path: k8s-config
+          ref: main
+
+      - name: Point the manifest at the new image
+        working-directory: k8s-config
+        run: |
+          set -euo pipefail
+          [ -f "$MANIFEST" ] || { echo "missing $MANIFEST"; exit 1; }
+          sed -i -E "s|(image: .*/$IMAGE:).*|\1${{ github.sha }}|" "$MANIFEST"
+          # Fail loudly rather than committing a manifest the sed missed.
+          grep -q "$IMAGE:${{ github.sha }}" "$MANIFEST" \
+            || { echo "failed to set the image in $MANIFEST"; exit 1; }
+          git diff --stat
+
+      - name: Commit and push
+        working-directory: k8s-config
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "manifest already points at ${{ github.sha }} -- nothing to commit"
+            exit 0
+          fi
+
+          git config user.name  "ect-relay-ci"
+          git config user.email "ect-relay-ci@users.noreply.github.com"
+          git commit -am "deploy(ect-relay): ${{ github.ref_name }}
+
+          Image built from english-communication-trainer@${{ github.sha }} by
+          ${{ github.workflow }} run ${{ github.run_id }}."
+
+          # The concurrency group makes a race unlikely, but a human committing to
+          # k8s-config at the same moment would still reject this push.
+          for attempt in 1 2 3; do
+            if git push origin main; then exit 0; fi
+            echo "push rejected, rebasing (attempt $attempt)"
+            git pull --rebase origin main
+          done
+          echo "could not push the manifest update after 3 attempts"
+          exit 1
+
+      - name: Summary
+        run: |
+          {
+            echo "### Staged: ect-relay"
+            echo ""
+            echo "Image tag \`${{ github.sha }}\` committed to k8s-config."
+            echo ""
+            echo "Argo CD is on manual sync, so this is **not live yet**."
+            echo "Sync \`ect-relay\` at <https://argo.int.sajitkhadka.com> to roll it out."
+            echo ""
+            echo "The PC half (backend, agent) is not deployed by this workflow -"
+            echo "it runs from a git checkout. Pull there separately if it changed."
+          } >> "$GITHUB_STEP_SUMMARY"
