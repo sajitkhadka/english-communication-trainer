@@ -54,7 +54,9 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      # Exact version, not a floating major: astral-sh/setup-uv publishes no `v10`
+      # tag, only `v10.0.1`. CI caught this as "unable to find version v10".
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
       - uses: actions/setup-python@v7
