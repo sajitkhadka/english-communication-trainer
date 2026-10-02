@@ -12,5 +12,5 @@ blocked, done, wontfix. Decisions that were genuinely contested go in `docs/adr/
 | [0005](0005-go-live-dns-and-end-to-end-checks.md) | ↳ Go live: add the DNS record and run end-to-end checks | chore | in-progress |
 | [0006](0006-installable-android-pwa.md) | ↳ Make the frontend an installable Android PWA | feature | in-progress |
 | [0007](0007-offline-recording-queue.md) | ↳ Queue recordings offline and retry the upload | feature | in-progress |
-| [0008](0008-update-docs-for-public-access.md) | ↳ Update docs for public access | chore | blocked |
+| [0008](0008-update-docs-for-public-access.md) | ↳ Update docs for public access | chore | in-progress |
 | [0009](0009-spike-expose-other-services-through-the-tunnel.md) | ↳ Plan exposing other services through the tunnel | spike | in-progress |

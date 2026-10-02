@@ -1,12 +1,14 @@
 # 0008 — Update docs for public access
 
-**Status:** blocked
+**Status:** in-progress
 **Type:** chore
 **Created:** 2026-10-02
 **Parent:** [0001](0001-public-access-cloudflare.md)
-**Related:** ADR 0009. Blocked by [0005](0005-go-live-dns-and-end-to-end-checks.md).
+**Related:** ADR 0009. Follows [0005](0005-go-live-dns-and-end-to-end-checks.md).
 
 ## Description
+
+All docs are written and committed except the ADR 0009 status, which stays Proposed until the human checks in 0005 pass.
 
 Once the public address works, make the docs say so. Several docs currently say the relay
 is reachable from the LAN and the VPN "and from nowhere else". That stops being true.
@@ -14,13 +16,13 @@ is reachable from the LAN and the VPN "and from nowhere else". That stops being 
 Done when:
 
 - [ ] ADR 0009 is Accepted, with an "Implemented" date and any changes that did not survive real use.
-- [ ] ADR 0006 has a one-line pointer to ADR 0009 at the "internal-only" amendment.
-- [ ] `docs/relay.md` covers the public path, the second listener and the new settings.
-- [ ] `docs/relay.md` "When something is wrong" has rows for a `403` on the public host and for login loops.
-- [ ] `relay/README.md` lists the new settings and has the agent routes fixed.
-- [ ] The k8s-config docs are updated (`ect-relay/README.md`, and a new `cloudflared/README.md`).
-- [ ] `D:\projects\linux\CREDENTIALS.md` has a short Cloudflare Access section.
-- [ ] This repo's `CLAUDE.md` says the public listener exists and `/agent/` must never be on it.
+- [x] ADR 0006 has a one-line pointer to ADR 0009 at the "internal-only" amendment.
+- [x] `docs/relay.md` covers the public path, the second listener and the new settings.
+- [x] `docs/relay.md` "When something is wrong" has rows for a `403` on the public host and for login loops.
+- [x] `relay/README.md` lists the new settings and has the agent routes fixed.
+- [x] The k8s-config docs are updated (`ect-relay/README.md`, and a new `cloudflared/README.md`).
+- [x] `D:\projects\linux\CREDENTIALS.md` has a short Cloudflare Access section.
+- [x] This repo's `CLAUDE.md` says the public listener exists and `/agent/` must never be on it.
 
 ## How to research
 
