@@ -1,6 +1,6 @@
 # 0005 — Go live: add the DNS record and run end-to-end checks
 
-**Status:** blocked
+**Status:** open
 **Type:** chore
 **Created:** 2026-10-02
 **Parent:** [0001](0001-public-access-cloudflare.md)
@@ -14,8 +14,8 @@ phone on mobile data with the VPN off.
 
 Done when every box below is ticked:
 
-- [ ] Inside the cluster, the public listener returns `403` with no header.
-- [ ] Inside the cluster, it returns `403` with a forged `Cf-Access-Jwt-Assertion: x.y.z`.
+- [x] Inside the cluster, the public listener returns `403` with no header.
+- [x] Inside the cluster, it returns `403` with a forged `Cf-Access-Jwt-Assertion: x.y.z`.
 - [ ] Inside the cluster, `/agent/status` on it returns `404`.
 - [ ] `curl -I https://ect.sajitkhadka.com` redirects to the Access login. It does not return the app.
 - [ ] Signing in with the allowed Google account opens the app. Another Google account is refused.
