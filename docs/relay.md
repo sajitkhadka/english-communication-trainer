@@ -207,6 +207,26 @@ finalises it the moment transcription finishes. Everything else stops at `record
 exactly as [ADR 0003](adr/0003-queue-based-frontend-to-claude-handoff.md) intended —
 you still press "Ready for AI processing" and run the skill yourself.
 
+## Public access (ADR 0009)
+
+The phone can also reach the relay at `https://ect.sajitkhadka.com`, with no VPN. The path
+is Cloudflare Access (Google sign-in, an email allowlist) -> Cloudflare Tunnel ->
+`cloudflared` in the cluster -> the relay's **second listener** on `:8081`.
+
+- The public listener checks the `Cf-Access-Jwt-Assertion` token itself (signature, issuer,
+  audience, expiry, email). A missing or bad token gets `403`, so a mistake in Access fails
+  closed instead of exposing the PC's API.
+- It has **no `/agent/` routes**, and the tunnel also answers `404` for `/agent`. `ect agent`
+  keeps using `https://ect.int.sajitkhadka.com` with its bearer token.
+- Uploads over `ECT_RELAY_PUBLIC_MAX_UPLOAD_BYTES` (95 MiB, under Cloudflare's 100 MB cap)
+  are refused up front with a readable message.
+- Cloudflare terminates TLS, so it can see recordings in transit. That is the accepted cost.
+- `ect.int.sajitkhadka.com` is unchanged and is the fallback if Cloudflare is unreachable.
+
+Settings (all in `relay/config.go`): `ECT_RELAY_PUBLIC_ADDR`, `ECT_RELAY_ACCESS_TEAM_DOMAIN`,
+`ECT_RELAY_ACCESS_AUD`, `ECT_RELAY_ACCESS_EMAILS`, `ECT_RELAY_PUBLIC_MAX_UPLOAD_BYTES`.
+The relay refuses to start if the public address is set without the other three.
+
 ## When something is wrong
 
 Start with the one question that splits the problem in half: **is the relay up, and
@@ -225,6 +245,8 @@ curl -u <user>:<pass> https://ect.int.sajitkhadka.com/api/relay/status
 | everything reads fine, writes 503 | working as designed — the PC is offline. |
 | recorder will not start | not a secure context. Check you are on `https://`, not an IP. |
 | `inbox_pending` climbing, PC awake | the agent is not running. `./register-agent-task.ps1 -Status`. |
+| `403 {"detail": "sign-in required"}` on `ect.sajitkhadka.com` | the request reached the relay without a valid Access token, or the email is not in `ECT_RELAY_ACCESS_EMAILS`. `kubectl -n ect-relay logs deploy/ect-relay` says which (`access: rejected ...`). |
+| sign-in loops, or the app says "Sign in again" | the Access session ended or the app's `aud` changed. Reload the page; check the Access app and `ECT_RELAY_ACCESS_AUD` still match. |
 | `ect agent status` shows `relay: 401`, and nothing changed on the PC | the relay's copy of the token changed under it. `kubectl -n ect-relay describe secret ect-relay-secrets` - `ECT_RELAY_TOKEN` should be 64 bytes. A shorter one means something applied a template over it. |
 
 Logs: `%LOCALAPPDATA%\ect-agent.log` on the PC,

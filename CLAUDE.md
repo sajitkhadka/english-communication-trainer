@@ -128,6 +128,10 @@ path is rejected before the relay sees it. The `/agent/` prefix is what a second
 auth-free Ingress can exempt without also exposing the browser's own inbox routes or
 the digest.
 
+The relay also has a public listener for the Cloudflare Tunnel (ADR 0009). It checks the
+Access token itself and **must never get `/agent/` routes** - the agent's bearer token is
+only safe because it is not reachable from the internet.
+
 The whole thing is optional: with `ECT_RELAY_URL` unset, nothing above runs and the app
 is exactly what it was. See `docs/relay.md` and `docs/adr/0006-…`.
 

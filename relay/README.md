@@ -16,7 +16,8 @@ Go, standard library plus a pure-Go SQLite driver, one static binary.
 
 | File | Role |
 | --- | --- |
-| `main.go` | route table, handlers, the server |
+| `main.go` | route tables (internal and public), handlers, the server |
+| `access.go` | Cloudflare Access token check for the public listener |
 | `config.go` | every `ECT_RELAY_*` setting |
 | `inbox.go` | blob store + `inbox.db` — captures waiting for the PC |
 | `digest.go` | the read-only snapshot, and which routes it can answer |
@@ -50,16 +51,22 @@ Browser-facing (guarded by the ingress basic-auth annotation):
 | `POST /api/inbox` | one capture: `uid`, `mode`, `topic`, `notes`, then `file` |
 | `GET /api/inbox/recent` | "did it arrive?", answerable from the phone that asked |
 
+A second listener (`ECT_RELAY_PUBLIC_ADDR`, `:8081`) serves the browser routes for the
+Cloudflare Tunnel. Every request needs a valid `Cf-Access-Jwt-Assertion` and it has no
+`/agent/` routes. It needs `ECT_RELAY_ACCESS_TEAM_DOMAIN`, `ECT_RELAY_ACCESS_AUD` and
+`ECT_RELAY_ACCESS_EMAILS`, and `ECT_RELAY_PUBLIC_MAX_UPLOAD_BYTES` sets its upload cap.
+See ADR 0009.
+
 Agent-facing (bearer `ECT_RELAY_TOKEN`):
 
 | Route | Purpose |
 | --- | --- |
-| `POST /api/agent/heartbeat` | the PC is up, and its API answers |
-| `GET /api/inbox/pending` | what is waiting |
-| `GET /api/inbox/{uid}/blob` | the audio |
-| `POST /api/inbox/{uid}/ack` | drained — **deletes the blob** |
-| `POST /api/inbox/{uid}/fail` | record why, so attempts advance |
-| `PUT /api/digest` | store the snapshot |
+| `POST /agent/heartbeat` | the PC is up, and its API answers |
+| `GET /agent/inbox/pending` | what is waiting |
+| `GET /agent/inbox/{uid}/blob` | the audio |
+| `POST /agent/inbox/{uid}/ack` | drained — **deletes the blob** |
+| `POST /agent/inbox/{uid}/fail` | record why, so attempts advance |
+| `PUT /agent/digest` | store the snapshot |
 
 The field order in `POST /api/inbox` matters: the handler streams the file part
 straight to disk, so the fields describing it must arrive first.

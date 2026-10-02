@@ -185,6 +185,7 @@ private registry.
   > wildcard A record pointing at a private address, and a `letsencrypt-dns01`
   > certificate so the secure context `getUserMedia` demands still exists. The recorder
   > is reachable from the LAN and over the WireGuard tunnel, and from nowhere else.
+  > (Since 2026-10-02 it is also reachable at `ect.sajitkhadka.com` - see ADR 0009.)
   >
   > This is strictly better for the concern above, and it costs something real: capture
   > now requires the tunnel to be up on the phone. "Record from anywhere with no prior
