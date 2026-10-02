@@ -969,6 +969,30 @@ td.num {
 }
 
 @media (max-width: 620px) {
+  .topbar {
+    padding: 0 0.85rem;
+    gap: 0.5rem 0.75rem;
+  }
+  .brand {
+    padding: 0.7rem 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* One swipeable row under the brand instead of eleven links wrapping over each other. */
+  .nav {
+    order: 3;
+    flex: 0 0 100%;
+    flex-wrap: nowrap;
+    padding-bottom: 0.4rem;
+    scrollbar-width: none;
+  }
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+  .nav a {
+    padding: 0.55rem 0.75rem;
+  }
   main {
     padding: 1rem 0.85rem 3rem;
   }
