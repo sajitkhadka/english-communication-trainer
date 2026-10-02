@@ -1,12 +1,14 @@
 # 0009 — Plan exposing other services through the tunnel
 
-**Status:** open
+**Status:** in-progress
 **Type:** spike
 **Created:** 2026-10-02
 **Parent:** [0001](0001-public-access-cloudflare.md)
 **Related:** ADR 0009, `k8s-config` ADR 0003
 
 ## Description
+
+A draft ADR is at `D:\projects\deployment\docs\adr\0005-public-services-through-cloudflare-tunnel.md`. The service list has open questions only the owner can answer (who uses grafana, prometheus, java-sandbox, jobquest, leetsensei, and whether to close port 443). Nothing was moved.
 
 Once the trainer works through the tunnel, the owner wants other services on their own
 subdomains the same way. That would also hide the home IP and let the router stop
@@ -17,7 +19,7 @@ Done when:
 
 - [ ] There is a list of services, each marked: tunnel with Access, tunnel without Access, or stay on the VPN.
 - [ ] The certificate question is answered (below).
-- [ ] A draft ADR exists in `D:\projects\deployment\docs\adr\`.
+- [x] A draft ADR exists in `D:\projects\deployment\docs\adr\`.
 - [ ] The owner has decided whether to close port 443.
 
 ## How to research

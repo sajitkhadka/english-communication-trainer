@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "./api";
+import { type QueuedCapture, discardQueued, drainQueue, listQueued, sendQueued } from "./captureQueue";
 import type { RelayStatus } from "./types";
 
 interface AsyncState<T> {
@@ -138,5 +139,43 @@ export function useRelay() {
     pcOnline: status === null ? true : status.pc_online,
     ready,
     refresh,
+  };
+}
+
+/** Recordings waiting on this device. While `enabled`, it retries them on a timer (each
+ *  with its own backoff), when the browser regains a connection, and on mount - which is
+ *  also how a queue survives an app restart. */
+export function useCaptureQueue(enabled: boolean) {
+  const [items, setItems] = useState<QueuedCapture[]>([]);
+
+  const reload = useCallback(() => {
+    listQueued()
+      .then(setItems)
+      .catch(() => setItems([]));
+  }, []);
+
+  const drain = useCallback(
+    (force = false) => {
+      void drainQueue(force).finally(reload);
+    },
+    [reload],
+  );
+
+  useEffect(() => {
+    reload();
+    if (!enabled) return;
+    drain();
+    const onOnline = () => drain(true);
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [enabled, drain, reload]);
+
+  useInterval(() => drain(), enabled && items.length > 0 ? 10000 : null);
+
+  return {
+    items,
+    reload,
+    retry: (item: QueuedCapture) => void sendQueued(item).then(reload, reload),
+    discard: (uid: string) => void discardQueued(uid).then(reload),
   };
 }

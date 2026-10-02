@@ -1,12 +1,14 @@
 # 0007 — Queue recordings offline and retry the upload
 
-**Status:** open
+**Status:** in-progress
 **Type:** feature
 **Created:** 2026-10-02
 **Parent:** [0001](0001-public-access-cloudflare.md)
 **Related:** ADR 0006, ADR 0009. Works best after [0006](0006-installable-android-pwa.md).
 
 ## Description
+
+Code is in (`src/captureQueue.ts`, `Recorder.tsx`, `Practice.tsx`, `hooks.ts`) and builds, but none of it has been run against a real relay or phone. I did not add `navigator.wakeLock`; check first whether Chrome stops recording on screen lock.
 
 If the phone has no connection when a recording ends, the upload fails and the recording is
 at risk. Keep the recording on the phone until the relay confirms it, and retry later.

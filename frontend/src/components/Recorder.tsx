@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api } from "../api";
+import { ApiError, api } from "../api";
+import { enqueue, sendQueued } from "../captureQueue";
 import type { RemoteMode } from "../types";
 import { formatClock } from "./common";
 
@@ -184,8 +185,10 @@ export default function Recorder({
         discard();
         onUploaded();
       } else {
+        // Keep the recording on this device first; it is deleted only once the relay
+        // confirms it, so a dropped connection cannot lose it.
         const uid = newUid();
-        const result = await api.uploadToInbox({
+        const item = await enqueue({
           uid,
           mode: target.mode,
           topic: target.topic ?? null,
@@ -193,7 +196,17 @@ export default function Recorder({
           filename: `${uid}.${extension}`,
         });
         discard();
-        onUploaded({ uid: result.uid, hint: result.hint });
+        try {
+          const result = await sendQueued(item);
+          onUploaded({ uid: result.uid, hint: result.hint });
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : "Upload failed.";
+          const refused = err instanceof ApiError && (err.status === 400 || err.status === 413);
+          onUploaded({
+            uid,
+            hint: `Saved on this phone, not uploaded yet: ${reason}${refused ? "" : " It will retry by itself."}`,
+          });
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");

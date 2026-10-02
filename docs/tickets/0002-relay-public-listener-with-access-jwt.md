@@ -1,6 +1,6 @@
 # 0002 — Add an Access-verified public listener to the relay
 
-**Status:** open
+**Status:** done
 **Type:** feature
 **Created:** 2026-10-02
 **Parent:** [0001](0001-public-access-cloudflare.md)
@@ -17,12 +17,12 @@ Today the relay has one listener (`:8080`) behind `ingress-nginx`. It stays as i
 
 Done when:
 
-- [ ] A new public listener starts only when its settings are all present, and refuses to start if they are half set.
-- [ ] Every request to it needs a valid `Cf-Access-Jwt-Assertion` header, or gets `403`.
-- [ ] No `/agent/` route exists on it. Those paths return `404`.
-- [ ] Uploads over the public limit get a readable `detail` message.
-- [ ] The existing listener behaves exactly as before.
-- [ ] `go test ./...`, `gofmt -l .` and `go vet ./...` pass in `relay/`.
+- [x] A new public listener starts only when its settings are all present, and refuses to start if they are half set.
+- [x] Every request to it needs a valid `Cf-Access-Jwt-Assertion` header, or gets `403`.
+- [x] No `/agent/` route exists on it. Those paths return `404`.
+- [x] Uploads over the public limit get a readable `detail` message.
+- [x] The existing listener behaves exactly as before.
+- [x] `go test ./...`, `gofmt -l .` and `go vet ./...` pass in `relay/`.
 
 ## How to research
 

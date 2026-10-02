@@ -29,8 +29,28 @@ export class ApiError extends Error {
   }
 }
 
+/** Cloudflare Access answers an ended login with a redirect to Google's sign-in page,
+ *  which a script cannot follow. `redirect: "manual"` turns that into something we can
+ *  recognise instead of an opaque CORS failure (ADR 0009). */
+export class SignedOutError extends ApiError {
+  constructor() {
+    super("Your sign-in has ended. Sign in again to continue.", 401);
+  }
+}
+
+export const SIGNED_OUT_EVENT = "ect:signed-out";
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, init);
+  let response: Response;
+  try {
+    response = await fetch(`${BASE}${path}`, { ...init, redirect: "manual" });
+  } catch {
+    throw new ApiError("You are offline, or the server cannot be reached.", 0);
+  }
+  if (response.type === "opaqueredirect") {
+    window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+    throw new SignedOutError();
+  }
   if (!response.ok) {
     // FastAPI puts the useful part in `detail`; fall back to the status text.
     let detail = response.statusText;

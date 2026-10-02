@@ -1,6 +1,6 @@
 # 0001 — Reach the trainer from anywhere via Cloudflare
 
-**Status:** open
+**Status:** in-progress
 **Type:** epic
 **Created:** 2026-10-02
 **Related:** [ADR 0009](../adr/0009-public-access-via-cloudflare-tunnel-and-access.md) (Proposed), ADR 0006
@@ -32,7 +32,7 @@ Cloudflare Access handles the Google login, and the relay checks the login token
 
 **Children** (suggested order)
 
-- [ ] [0002](0002-relay-public-listener-with-access-jwt.md) Add an Access-verified public listener to the relay
+- [x] [0002](0002-relay-public-listener-with-access-jwt.md) Add an Access-verified public listener to the relay
 - [ ] [0003](0003-create-cloudflare-tunnel-and-access-app.md) Create the Cloudflare tunnel, Access app and policy
 - [ ] [0004](0004-deploy-cloudflared-and-wire-the-relay.md) Deploy `cloudflared` and wire the relay in k8s-config
 - [ ] [0005](0005-go-live-dns-and-end-to-end-checks.md) Go live: add the DNS record and run end-to-end checks

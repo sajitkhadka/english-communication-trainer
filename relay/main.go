@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -80,6 +81,22 @@ func main() {
 		}
 	}()
 
+	var publicSrv *http.Server
+	if cfg.PublicAddr != "" {
+		verifier := NewAccessVerifier(cfg.AccessTeamDomain, cfg.AccessAUD, cfg.AccessEmails)
+		publicSrv = &http.Server{
+			Addr:              cfg.PublicAddr,
+			Handler:           logging(srv.PublicRoutes(verifier)),
+			ReadHeaderTimeout: 15 * time.Second,
+		}
+		go func() {
+			log.Printf("relay public listener on %s (access team %s)", cfg.PublicAddr, cfg.AccessTeamDomain)
+			if err := publicSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Fatalf("public listen: %v", err)
+			}
+		}()
+	}
+
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	<-sigs
@@ -89,6 +106,11 @@ func main() {
 	defer cancel()
 	if err := httpSrv.Shutdown(ctx); err != nil {
 		log.Printf("shutdown: %v", err)
+	}
+	if publicSrv != nil {
+		if err := publicSrv.Shutdown(ctx); err != nil {
+			log.Printf("public shutdown: %v", err)
+		}
 	}
 	log.Print("relay stopped")
 }
@@ -145,6 +167,39 @@ func (s *Server) Routes() http.Handler {
 	// --- the app itself ---
 	mux.Handle("/", s.static())
 	return mux
+}
+
+// PublicRoutes is the table for tunnel traffic: the browser's routes behind the Access
+// login check, and no /agent/ routes at all. A separate mux, not a flag on Routes, so a
+// header from the LAN cannot turn the public rules off.
+func (s *Server) PublicRoutes(access *AccessVerifier) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/relay/status", s.handleRelayStatus)
+	mux.Handle("POST /api/inbox", s.limitUpload(http.HandlerFunc(s.handleUpload)))
+	mux.HandleFunc("GET /api/inbox/recent", s.handleRecent)
+	mux.HandleFunc("/agent/", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError(w, http.StatusNotFound, "not found")
+	})
+	mux.Handle("/api/", s.board)
+	mux.Handle("/", s.static())
+	return access.Wrap(mux)
+}
+
+// limitUpload refuses a body over the public limit up front, with a message the
+// recorder can show, instead of letting the edge cut the upload off partway.
+func (s *Server) limitUpload(next http.Handler) http.Handler {
+	limit := s.cfg.PublicMaxUploadBytes
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if limit > 0 {
+			if r.ContentLength > limit {
+				writeJSONError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf(
+					"Recording is too large to upload over the internet (limit %d MB). Record it in shorter parts.", limit>>20))
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // authed guards the agent's endpoints with the shared bearer token.

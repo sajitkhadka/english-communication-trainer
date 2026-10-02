@@ -1,12 +1,14 @@
 # 0003 — Create the Cloudflare tunnel, Access app and policy
 
-**Status:** open
+**Status:** blocked
 **Type:** chore
 **Created:** 2026-10-02
 **Parent:** [0001](0001-public-access-cloudflare.md)
 **Related:** ADR 0009
 
 ## Description
+
+Blocked: this creates live Cloudflare resources, and you have not yet said go in this session. The allowed emails are `sajitkhadka@gmail.com` and `sanju.vp7@gmail.com`; the ticket's policy assumes one, so the policy should list both.
 
 Create the Cloudflare side of the design with the API: a tunnel, an Access application for
 `ect.sajitkhadka.com`, and a policy that lets in one person. Do **not** create the DNS

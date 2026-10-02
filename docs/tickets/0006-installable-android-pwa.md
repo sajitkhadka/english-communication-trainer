@@ -1,12 +1,14 @@
 # 0006 — Make the frontend an installable Android PWA
 
-**Status:** open
+**Status:** in-progress
 **Type:** feature
 **Created:** 2026-10-02
 **Parent:** [0001](0001-public-access-cloudflare.md)
 **Related:** ADR 0009
 
 ## Description
+
+Code is in and `npm run typecheck` and `npm run build` pass. Not yet tried in a browser or on the phone, so the other boxes are open: install prompt, offline open, and the sign-in-again banner all need a check on the real device once 0005 is done. The files are `frontend/public/` (manifest, icons, `sw.js`), `src/api.ts`, `src/App.tsx` and `src/main.tsx`.
 
 The frontend is a normal web page. It has no web manifest, no service worker and no
 IndexedDB use. So it cannot be installed on an Android phone, and history is not readable
@@ -21,7 +23,7 @@ Done when:
 - [ ] With the phone offline, the app opens and shows cached history.
 - [ ] Offline writes show a clear message. Nothing is cached for `POST`, `PUT` or `DELETE`.
 - [ ] When the Access session ends, the app shows "Sign in again" and a tap goes to the login page.
-- [ ] `npm run typecheck` and `npm run build` pass in `frontend/`.
+- [x] `npm run typecheck` and `npm run build` pass in `frontend/`.
 
 ## How to research
 

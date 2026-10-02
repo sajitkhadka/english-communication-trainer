@@ -49,6 +49,14 @@ type Config struct {
 	WOLMac       string
 	WOLBroadcast string
 	WOLCooldown  time.Duration
+
+	// Public listener (ADR 0009): traffic from the Cloudflare tunnel. Empty PublicAddr
+	// means there is none. When set, the three Access settings are required too.
+	PublicAddr           string
+	AccessTeamDomain     string
+	AccessAUD            string
+	AccessEmails         []string
+	PublicMaxUploadBytes int64
 }
 
 func env(key, fallback string) string {
@@ -91,6 +99,11 @@ func LoadConfig() (Config, error) {
 		StaticDir:    env("ECT_RELAY_STATIC_DIR", ""),
 		WOLMac:       env("ECT_RELAY_WOL_MAC", ""),
 		WOLBroadcast: env("ECT_RELAY_WOL_BROADCAST", "255.255.255.255:9"),
+
+		PublicAddr:       env("ECT_RELAY_PUBLIC_ADDR", ""),
+		AccessTeamDomain: env("ECT_RELAY_ACCESS_TEAM_DOMAIN", ""),
+		AccessAUD:        env("ECT_RELAY_ACCESS_AUD", ""),
+		AccessEmails:     splitList(env("ECT_RELAY_ACCESS_EMAILS", "")),
 	}
 
 	var err error
@@ -101,6 +114,10 @@ func LoadConfig() (Config, error) {
 		return cfg, err
 	}
 	if cfg.ProxyTimeout, err = envDuration("ECT_RELAY_PROXY_TIMEOUT", 30*time.Second); err != nil {
+		return cfg, err
+	}
+	// Cloudflare's free plan rejects a request body over 100 MB, so stay under it.
+	if cfg.PublicMaxUploadBytes, err = envBytes("ECT_RELAY_PUBLIC_MAX_UPLOAD_BYTES", 95<<20); err != nil {
 		return cfg, err
 	}
 	if cfg.WOLCooldown, err = envDuration("ECT_RELAY_WOL_COOLDOWN", 5*time.Minute); err != nil {
@@ -115,5 +132,20 @@ func LoadConfig() (Config, error) {
 	if cfg.AgentToken == "" {
 		return cfg, fmt.Errorf("ECT_RELAY_TOKEN is required: it authenticates `ect agent`")
 	}
+	if cfg.PublicAddr != "" && (cfg.AccessTeamDomain == "" || cfg.AccessAUD == "" || len(cfg.AccessEmails) == 0) {
+		return cfg, fmt.Errorf(
+			"ECT_RELAY_PUBLIC_ADDR needs ECT_RELAY_ACCESS_TEAM_DOMAIN, ECT_RELAY_ACCESS_AUD and ECT_RELAY_ACCESS_EMAILS: " +
+				"a public listener without the login check would expose the PC's API")
+	}
 	return cfg, nil
+}
+
+func splitList(raw string) []string {
+	var out []string
+	for _, v := range strings.Split(raw, ",") {
+		if v = strings.ToLower(strings.TrimSpace(v)); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }

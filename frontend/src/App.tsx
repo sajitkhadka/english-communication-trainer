@@ -1,6 +1,7 @@
+import { useEffect, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 
-import { api } from "./api";
+import { SIGNED_OUT_EVENT, api } from "./api";
 import { useAsync, useInterval } from "./hooks";
 import Notes from "./pages/Notes";
 import Practice from "./pages/Practice";
@@ -17,6 +18,15 @@ export default function App() {
   useInterval(() => queue.reload(), 15000);
 
   const pending = queue.data?.count ?? 0;
+
+  // Set when Cloudflare Access ends the login (see api.ts). No retries: the only way
+  // forward is a full-page load, which Access sends to the Google sign-in.
+  const [signedOut, setSignedOut] = useState(false);
+  useEffect(() => {
+    const onSignedOut = () => setSignedOut(true);
+    window.addEventListener(SIGNED_OUT_EVENT, onSignedOut);
+    return () => window.removeEventListener(SIGNED_OUT_EVENT, onSignedOut);
+  }, []);
 
   return (
     <div className="app">
@@ -45,6 +55,13 @@ export default function App() {
           </span>
         )}
       </header>
+
+      {signedOut && (
+        <div className="error" role="alert" style={{ margin: "1rem" }}>
+          Your sign-in has ended.{" "}
+          <button onClick={() => window.location.assign("/")}>Sign in again</button>
+        </div>
+      )}
 
       <main>
         <Routes>

@@ -12,7 +12,7 @@ import {
   formatDate,
   formatDuration,
 } from "../components/common";
-import { useAsync, useDocumentTitle, useInterval, useRelay } from "../hooks";
+import { useAsync, useCaptureQueue, useDocumentTitle, useInterval, useRelay } from "../hooks";
 import type { Mode, RemoteMode, Session } from "../types";
 
 /** The four modes that can be captured remotely - the ones that need no prior setup.
@@ -145,6 +145,9 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
   );
   const undrained = (inbox.data?.items ?? []).filter((item) => !item.acked_at);
 
+  // Recordings still on this phone because the upload has not gone through yet.
+  const onDevice = useCaptureQueue(relay.isRelay);
+
   // Reaching the PC is what turns a capture into a session, so this is only worth
   // polling while something is actually in flight.
   useInterval(
@@ -215,6 +218,7 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
                   setSent(result?.hint ?? "Saved on the server.");
                   inbox.reload();
                   relay.refresh();
+                  onDevice.reload();
                 }}
               />
             </div>
@@ -245,6 +249,56 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
                     <span className="small">{blurb}</span>
                   </button>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {onDevice.items.length > 0 && (
+            <div className="card">
+              <div className="card-head">
+                <h2>Waiting to upload</h2>
+                <span className="muted small">{onDevice.items.length} on this phone</span>
+              </div>
+              <p className="card-sub">
+                These are saved on this device and are removed only after the server has them.
+              </p>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Recorded</th>
+                      <th>Mode</th>
+                      <th>Size</th>
+                      <th>State</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {onDevice.items.map((item) => (
+                      <tr key={item.uid}>
+                        <td className="small">{formatDate(item.createdAt)}</td>
+                        <td className="small">{MODE_LABEL[item.mode]}</td>
+                        <td className="num">{(item.blob.size / 1e6).toFixed(1)} MB</td>
+                        <td className="small">
+                          {item.lastError ? (
+                            <span className="muted">
+                              {item.lastError}
+                              {!item.rejected && ` Tried ${item.attempts}×, retrying.`}
+                            </span>
+                          ) : (
+                            <span className="muted">uploading…</span>
+                          )}
+                        </td>
+                        <td>
+                          <div className="btn-row">
+                            <button onClick={() => onDevice.retry(item)}>Retry now</button>
+                            <button onClick={() => onDevice.discard(item.uid)}>Discard</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}

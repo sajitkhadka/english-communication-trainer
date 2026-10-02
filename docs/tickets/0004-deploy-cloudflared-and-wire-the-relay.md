@@ -1,12 +1,14 @@
 # 0004 — Deploy `cloudflared` and wire the relay in k8s-config
 
-**Status:** open
+**Status:** blocked
 **Type:** chore
 **Created:** 2026-10-02
 **Parent:** [0001](0001-public-access-cloudflare.md)
 **Related:** ADR 0009. Needs the tunnel id and `aud` tag from [0003](0003-create-cloudflare-tunnel-and-access-app.md), and the new listener from [0002](0002-relay-public-listener-with-access-jwt.md).
 
 ## Description
+
+Blocked: needs the tunnel id, credentials and `aud` tag from 0003.
 
 Run `cloudflared` in the cluster and point it at the relay's new public listener. This is
 done in the manifests repo, `D:\projects\deployment` (remote `k8s-config`). Argo CD is on
