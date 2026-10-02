@@ -1,6 +1,6 @@
 # 0004 — Deploy `cloudflared` and wire the relay in k8s-config
 
-**Status:** blocked
+**Status:** in-progress
 **Type:** chore
 **Created:** 2026-10-02
 **Parent:** [0001](0001-public-access-cloudflare.md)
@@ -8,7 +8,7 @@
 
 ## Description
 
-Blocked: needs the tunnel id, credentials and `aud` tag from 0003.
+Manifests are committed in `deployment` (not pushed, not synced) and pass the strict client dry run. The allowed emails are in a new SealedSecret `ect-relay-access`, not the ConfigMap. Still open: the readiness check can only be proven after a sync, and the relay needs a new image from a `relay-v*` tag (the owner decides when).
 
 Run `cloudflared` in the cluster and point it at the relay's new public listener. This is
 done in the manifests repo, `D:\projects\deployment` (remote `k8s-config`). Argo CD is on
@@ -17,10 +17,10 @@ manual sync, so nothing changes in the cluster until the owner syncs it.
 Done when:
 
 - [ ] A `cloudflared` app runs with two replicas and passes its readiness check.
-- [ ] The tunnel's rules live in git and return `404` for `/agent`.
-- [ ] The relay exposes the new port and has the new settings.
-- [ ] The two existing relay Ingresses are unchanged.
-- [ ] All manifests pass a strict client dry run against the live cluster.
+- [x] The tunnel's rules live in git and return `404` for `/agent`.
+- [x] The relay exposes the new port and has the new settings.
+- [x] The two existing relay Ingresses are unchanged.
+- [x] All manifests pass a strict client dry run against the live cluster.
 
 ## How to research
 

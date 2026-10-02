@@ -33,7 +33,7 @@ Cloudflare Access handles the Google login, and the relay checks the login token
 **Children** (suggested order)
 
 - [x] [0002](0002-relay-public-listener-with-access-jwt.md) Add an Access-verified public listener to the relay
-- [ ] [0003](0003-create-cloudflare-tunnel-and-access-app.md) Create the Cloudflare tunnel, Access app and policy
+- [x] [0003](0003-create-cloudflare-tunnel-and-access-app.md) Create the Cloudflare tunnel, Access app and policy
 - [ ] [0004](0004-deploy-cloudflared-and-wire-the-relay.md) Deploy `cloudflared` and wire the relay in k8s-config
 - [ ] [0005](0005-go-live-dns-and-end-to-end-checks.md) Go live: add the DNS record and run end-to-end checks
 - [ ] [0006](0006-installable-android-pwa.md) Make the frontend an installable Android PWA

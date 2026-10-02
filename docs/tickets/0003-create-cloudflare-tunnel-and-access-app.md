@@ -1,6 +1,6 @@
 # 0003 — Create the Cloudflare tunnel, Access app and policy
 
-**Status:** blocked
+**Status:** done
 **Type:** chore
 **Created:** 2026-10-02
 **Parent:** [0001](0001-public-access-cloudflare.md)
@@ -8,7 +8,7 @@
 
 ## Description
 
-Blocked: this creates live Cloudflare resources, and you have not yet said go in this session. The allowed emails are `sajitkhadka@gmail.com` and `sanju.vp7@gmail.com`; the ticket's policy assumes one, so the policy should list both.
+Done 2026-10-02. Tunnel `home-k3s` id `3bb363a6-021a-4415-bb24-f5c78b9868f7`. Access app "ECT relay" id `9ef41f31-2323-45d2-bd5f-46050e10942d`, `aud` `3bca49e122fee812904e821a05ab2bb1f0516ad942966410e3bb690725e83a14`. One allow policy lists both emails. Recovery copy of the tunnel secret is in `linux/credentials.env`. A first tunnel made by mistake (its secret was lost) was deleted and recreated.
 
 Create the Cloudflare side of the design with the API: a tunnel, an Access application for
 `ect.sajitkhadka.com`, and a policy that lets in one person. Do **not** create the DNS
@@ -18,11 +18,11 @@ Answer the open questions in 0001 first (the allowed email in particular).
 
 Done when:
 
-- [ ] A locally-managed tunnel named `home-k3s` exists, and its credentials are stored safely.
-- [ ] An Access app covers `ect.sajitkhadka.com`, with Google as the only login method.
-- [ ] Exactly one `allow` policy exists, for the owner's email.
-- [ ] The app's `aud` tag and the tunnel id are noted for 0002 and 0004.
-- [ ] No DNS record for `ect` exists yet.
+- [x] A locally-managed tunnel named `home-k3s` exists, and its credentials are stored safely.
+- [x] An Access app covers `ect.sajitkhadka.com`, with Google as the only login method.
+- [x] Exactly one `allow` policy exists, for the owner's email.
+- [x] The app's `aud` tag and the tunnel id are noted for 0002 and 0004.
+- [x] No DNS record for `ect` exists yet.
 
 ## How to research
 
