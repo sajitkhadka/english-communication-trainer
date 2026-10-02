@@ -8,6 +8,8 @@
 
 ## Description
 
+Install confirmed on the owner's Android phone (2026-10-02) after `relay-v0.1.1`: the manifest link needs `crossorigin="use-credentials"` or Cloudflare Access redirects it. The mobile nav was also fixed. Offline open and the sign-in-again banner are not checked yet.
+
 Code is in and `npm run typecheck` and `npm run build` pass. Not yet tried in a browser or on the phone, so the other boxes are open: install prompt, offline open, and the sign-in-again banner all need a check on the real device once 0005 is done. The files are `frontend/public/` (manifest, icons, `sw.js`), `src/api.ts`, `src/App.tsx` and `src/main.tsx`.
 
 The frontend is a normal web page. It has no web manifest, no service worker and no
@@ -19,7 +21,7 @@ Cloudflare Access login without a retry loop.
 
 Done when:
 
-- [ ] Chrome on Android offers "Install app", and the installed app opens full screen.
+- [x] Chrome on Android offers "Install app", and the installed app opens full screen.
 - [ ] With the phone offline, the app opens and shows cached history.
 - [ ] Offline writes show a clear message. Nothing is cached for `POST`, `PUT` or `DELETE`.
 - [ ] When the Access session ends, the app shows "Sign in again" and a tap goes to the login page.
