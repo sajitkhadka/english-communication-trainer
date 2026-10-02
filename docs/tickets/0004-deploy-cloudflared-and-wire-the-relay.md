@@ -8,7 +8,7 @@
 
 ## Description
 
-Manifests are committed in `deployment` (not pushed, not synced) and pass the strict client dry run. The allowed emails are in a new SealedSecret `ect-relay-access`, not the ConfigMap. Still open: the readiness check can only be proven after a sync, and the relay needs a new image from a `relay-v*` tag (the owner decides when).
+Release `relay-v0.1.0` is built and `ect-relay` is synced: the public listener runs on 8081 and answers `403` without a valid token (checked from a pod). A Service fix was needed (ports must be named). Still open: apply `argocd/applications/cloudflared.yaml` and sync it, then check both replicas are ready. Note that on the public listener `/agent/*` is `403` without a login token and `404` with one.
 
 Run `cloudflared` in the cluster and point it at the relay's new public listener. This is
 done in the manifests repo, `D:\projects\deployment` (remote `k8s-config`). Argo CD is on
