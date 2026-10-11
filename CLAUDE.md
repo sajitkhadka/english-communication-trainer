@@ -53,7 +53,7 @@ it at ~15s instead of a multi-GB CUDA download. That only works because `pipelin
 imports are local to the functions that need them — a module-level `import torch`
 anywhere reachable from `app` breaks CI while passing locally. Only `relay/` is built
 into an image; the backend and frontend run on the PC from a checkout, so a
-`relay-v*.*.*` tag is the only thing that deploys (`docs/relay.md`, "Shipping a new
+`vX.Y.Z` tag is the only thing that deploys (`docs/relay.md`, "Shipping a new
 relay").
 
 ## The architecture in one idea
@@ -273,4 +273,4 @@ It touches six places, and missing one produces a silently wrong `overall`:
 - `docs/relay.md` — remote capture: the relay, `ect agent`, and how to run both
 - `relay/README.md` — the Go switchboard itself; manifests live in the `k8s-config` repo
 - `docs/adr/` — the load-bearing decisions and the alternatives rejected
-- `.github/workflows/` — `ci.yml` on every push, `deploy.yml` on a `relay-v*.*.*` tag
+- `.github/workflows/` — `ci.yml` on every push, `deploy.yml` on a `v*.*.*` tag

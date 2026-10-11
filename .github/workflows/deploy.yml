@@ -1,23 +1,23 @@
 name: Deploy relay
 
-# Builds the relay image and records the new tag in the k8s-config repo. It does not
-# talk to the cluster: Argo CD owns what is running, and this workflow's job is to
-# change the desired state in git. Same shape as sync-todo's deploy workflow, and for
-# the same reason - a tag written straight into the cluster with `kubectl set image`
-# exists nowhere in git, so Argo CD reports permanent drift and reverts it on the next
-# sync.
+# Tag-driven release. Pushing vX.Y.Z does all of this:
+#   1. builds the relay image and pushes it to the registry,
+#   2. commits the new image tag into the k8s-config repo,
+#   3. Argo CD (automated sync) notices the commit and rolls it out,
+#   4. a GitHub Release is created with notes generated from the merged changes.
 #
-# Pushing a tag stages a release; it does not ship it. Argo CD is on manual sync, so
-# ect-relay shows OutOfSync until someone syncs it.
+# It never talks to the cluster: Argo CD owns what is running, and this workflow only changes the
+# desired state in git. A tag written straight into the cluster with `kubectl set image` exists
+# nowhere in git, so Argo CD would report permanent drift and revert it.
 #
-# Only the relay is built here. The backend and frontend run on the PC from a git
-# checkout, not from an image - that is the whole point of ADR 0006's split, and there
-# is nothing to deploy for them.
+# Only the relay is built here. The backend and frontend run on the PC from a git checkout, not from
+# an image - that is the whole point of ADR 0006's split, and there is nothing to deploy for them.
+# (Tags used to be `relay-vX.Y.Z`; they are plain `vX.Y.Z` now, like every other deployable repo.)
 
 on:
   push:
     tags:
-      - 'relay-v*.*.*'
+      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       reason:
@@ -113,13 +113,32 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "### Staged: ect-relay"
+            echo "### Committed: ect-relay"
             echo ""
             echo "Image tag \`${{ github.sha }}\` committed to k8s-config."
-            echo ""
-            echo "Argo CD is on manual sync, so this is **not live yet**."
-            echo "Sync \`ect-relay\` at <https://argo.int.sajitkhadka.com> to roll it out."
+            echo "Argo CD auto-syncs \`ect-relay\`; it should be live within a few minutes."
             echo ""
             echo "The PC half (backend, agent) is not deployed by this workflow -"
             echo "it runs from a git checkout. Pull there separately if it changed."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Only after the manifests are committed, so a Release exists only for a tag that actually shipped.
+  release:
+    needs: update-manifests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Safe to re-run: a re-run of this workflow must not fail on an existing release.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists"; exit 0
+          fi
+          flags=(--generate-notes --verify-tag --title "$GITHUB_REF_NAME")
+          # v1.2.3-rc1 (any pre-release suffix) is a pre-release.
+          [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "${flags[@]}"

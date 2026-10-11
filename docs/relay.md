@@ -136,16 +136,17 @@ ECT_LOCAL_API_URL=http://127.0.0.1:8000
 
 ## Shipping a new relay
 
-`.github/workflows/deploy.yml` fires on a `relay-v*.*.*` tag and does two things:
-builds and pushes the image, then commits the new tag into the `k8s-config` repo.
+`.github/workflows/deploy.yml` fires on a `v*.*.*` tag and does three things:
+builds and pushes the image, commits the new tag into the `k8s-config` repo, then creates a
+GitHub Release with generated notes.
 
 ```sh
-git tag relay-v0.2.0 && git push origin relay-v0.2.0
+git tag v0.2.0 && git push origin v0.2.0
 ```
 
-It stops there on purpose. Argo CD is on manual sync, so a tag *stages* a release;
-`ect-relay` shows OutOfSync until someone syncs it at
-<https://argo.int.sajitkhadka.com>. Nothing here talks to the cluster directly - an
+That is the whole release. Argo CD auto-syncs `ect-relay` from `k8s-config`, so the new image
+rolls out within a few minutes (watch it at <https://argo.int.sajitkhadka.com>). Nothing here
+talks to the cluster directly - an
 image set with `kubectl set image` exists nowhere in git, so Argo CD calls it drift
 and reverts it on the next sync.
 

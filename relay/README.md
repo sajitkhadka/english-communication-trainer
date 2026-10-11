@@ -95,10 +95,10 @@ the auth boundary. No relay, cluster or GPU needed.
 
 ## How it ships
 
-A `relay-v*.*.*` tag on this repo runs `.github/workflows/deploy.yml`: it builds the
+A `v*.*.*` tag on this repo runs `.github/workflows/deploy.yml`: it builds the
 image on the `sserver-ect` self-hosted runner, pushes it to the LAN registry, and
-commits the new tag into the `k8s-config` repo. Argo CD is on manual sync, so the tag
-stages a release rather than shipping one.
+commits the new tag into the `k8s-config` repo, and creates a GitHub Release. Argo CD auto-syncs
+the commit, so the tag ships the release.
 
 Build from the **repo root**, not `relay/` — the same Dockerfile builds the frontend, so
 the relay always serves the UI that this commit produces:
