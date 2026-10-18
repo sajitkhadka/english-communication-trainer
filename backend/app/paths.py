@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .config import settings
 
-MODES = ("recommended", "freeform", "interview", "worklog", "brainstorm", "journal")
+MODES = ("recommended", "freeform", "interview", "exam", "worklog", "brainstorm", "journal")
 
 
 def slugify(text: str, *, max_len: int = 40) -> str:

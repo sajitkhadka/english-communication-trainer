@@ -9,6 +9,7 @@ export const MODE_LABEL: Record<Mode, string> = {
   recommended: "Recommended",
   freeform: "Free-form",
   interview: "Interview",
+  exam: "Exam prep",
   worklog: "Worklog",
   brainstorm: "Brainstorm",
   journal: "Daily journal",

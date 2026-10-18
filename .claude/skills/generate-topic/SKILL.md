@@ -10,11 +10,18 @@ the target vocabulary; the backend owns the database writes.
 
 All commands run from the `backend/` directory.
 
+## 0. Exam prep short-circuit
+
+If the arguments start with `exam` (`/generate-topic exam celpip`, `exam ielts part 2`),
+this is general-English exam practice and deliberately **not personalised**. Skip steps
+1-2 and the career-flavoured parts of step 3: do not read `data/profile.md` or
+`data/learning-notes.md`. Vocabulary *is* tracked. Go to "Exam mode" at the end of this file.
+
 ## 1. Gather context (a few cheap reads)
 
 ```bash
 cd backend
-uv run ect vocab due --limit 15     # words needing review + corpus stats
+uv run ect vocab due --limit 15 --track career   # words needing review + corpus stats
 uv run ect vocab gaps --limit 20 --brief   # active vs. passive: recognised but never produced
 uv run ect requests list            # topic requests raised from the frontend
 ```
@@ -45,6 +52,7 @@ Parse the user's arguments loosely:
 | nothing, or `recommended` | `recommended` | topic + target words |
 | `interview`, or a question-shaped request | `interview` | one question, **no target words** |
 | `freeform` | `freeform` | prompt only, no target words |
+| `exam ...` | `exam` | CELPIP / IELTS style task, hypothetical, no target words; see "Exam mode" |
 
 Anything left over is the `--category` (e.g. `interview system-design` -> mode
 `interview`, category `system-design`). If an open request from `ect requests list`
@@ -115,3 +123,38 @@ Show the user, in plain text:
 - one line on why this topic (which profile fact it draws on).
 
 Do not analyse anything. Recording comes next, then `/process-session`.
+
+## Exam mode (`exam`)
+
+Practice for CELPIP or IELTS speaking. The point is the *task format*, not the user's
+life, so the scenario is invented and nothing about it should come from the profile.
+
+- Exam: `celpip` or `ielts`. If they did not say, use whichever the open request names;
+  otherwise alternate with the most recent `exam` session (`uv run ect session list --mode exam --limit 3`).
+- Task: pick one real task type and set it as `--category`, e.g. `celpip-giving-advice`,
+  `celpip-personal-experience`, `celpip-describing-scene`, `celpip-making-predictions`,
+  `celpip-comparing-and-persuading`, `celpip-difficult-situation`, `celpip-expressing-opinions`,
+  `celpip-unusual-situation`, `ielts-part-1`, `ielts-part-2-cue-card`, `ielts-part-3`. Vary
+  it from the last few sessions.
+- Topic: write it the way the exam would, with the setup the candidate is given
+  (CELPIP: "You are ... a friend asks ... give advice"; IELTS part 2: a cue card with
+  "You should say: ..." bullets). Everyday, general-interest scenarios; nothing about
+  software, the user's employer or career. Keep the exam's own time limit in the text
+  (CELPIP 60-90 s, IELTS part 2 1-2 min).
+- **Target vocabulary: 5-6 terms** that lift the speech without being everyday words and
+  without being engineering jargon: precise verbs, collocations, hedges and connectors,
+  idioms, and evaluative adjectives that fit the scenario ("a double-edged sword",
+  "tentatively", "bear in mind", "far-reaching", "a stopgap", "mitigate", "in hindsight").
+  Skip anything a competent B2 speaker uses daily. Run `uv run ect vocab due --limit 15 --track exam`
+  and take 2-3 due words that fit the scenario (general-register ones only); the rest
+  brand-new, varying `kind` across `word`/`phrase`/`idiom`. Each must be usable naturally
+  in the scenario - never force a fit. Register new ones with `ect vocab add` (with
+  `meaning` and `example`, `source: "recommended"`, `track: "exam"`) before creating the
+  session. The `exam` track keeps these out of career topics and the other way round.
+
+```bash
+uv run ect session create --mode exam --category "celpip-giving-advice"   --topic "..." --target-words "a stopgap,bear in mind,tentatively"
+```
+
+Report the session id, exam and task type, and the topic. If an open request was
+consumed, close it as in step 5.

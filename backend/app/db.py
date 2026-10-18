@@ -85,6 +85,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     """`CREATE TABLE IF NOT EXISTS` only helps a fresh DB - a column added to
     schema.sql after a DB already exists needs its own `ALTER TABLE` here (see
     CLAUDE.md). Guarded so a DB that already has the column is a no-op."""
+    word_columns = {row["name"] for row in conn.execute("PRAGMA table_info(words)")}
+    if "track" not in word_columns:
+        conn.execute("ALTER TABLE words ADD COLUMN track TEXT DEFAULT 'career'")
     existing = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
     for column in ("title", "summary", "external_uid"):
         if column not in existing:
@@ -270,6 +273,7 @@ def score_history(conn: sqlite3.Connection, limit: int = 200) -> list[dict[str, 
     rows = conn.execute(
         """SELECT sc.*, s.mode, s.topic, s.category
              FROM scores sc JOIN sessions s ON s.id = sc.session_id
+            WHERE s.mode != 'exam'
             ORDER BY sc.id ASC LIMIT ?""",
         (limit,),
     )
@@ -297,8 +301,10 @@ def add_word(
     example: str | None = None,
     source: str | None = None,
     notes: str | None = None,
+    track: str | None = None,
 ) -> int:
-    """Insert a word, or enrich the existing row without clobbering good data."""
+    """Insert a word, or enrich the existing row without clobbering good data. `track`
+    only applies to a new row: a term already in the corpus keeps the track it arrived with."""
     term = term.strip()
     existing = get_word_by_term(conn, term)
     if existing:
@@ -313,29 +319,35 @@ def add_word(
         )
         return int(existing["id"])
     cur = conn.execute(
-        """INSERT INTO words (term, kind, meaning, example, first_seen, due_date, source, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (term, kind, meaning, example, today(), today(), source, notes),
+        """INSERT INTO words (term, kind, meaning, example, first_seen, due_date, source, notes,
+                              track)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (term, kind, meaning, example, today(), today(), source, notes, track or "career"),
     )
     return int(cur.lastrowid)
 
 
 def due_words(
-    conn: sqlite3.Connection, limit: int = 15, on_date: str | None = None
+    conn: sqlite3.Connection,
+    limit: int = 15,
+    on_date: str | None = None,
+    track: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Words due for review: least mastered and longest overdue first."""
+    """Words due for review: least mastered and longest overdue first. `track` narrows
+    to `career` or `exam`; unset returns both."""
     rows = conn.execute(
         """SELECT * FROM words
-            WHERE due_date IS NULL OR due_date <= ?
+            WHERE (due_date IS NULL OR due_date <= ?)
+              AND (? IS NULL OR COALESCE(track, 'career') = ?)
             ORDER BY mastery ASC, due_date ASC, times_seen ASC
             LIMIT ?""",
-        (on_date or today(), limit),
+        (on_date or today(), track, track, limit),
     )
     return [dict(r) for r in rows]
 
 
 def list_words(
-    conn: sqlite3.Connection, *, sort: str = "recency", limit: int = 1000
+    conn: sqlite3.Connection, *, sort: str = "recency", limit: int = 1000, track: str | None = None
 ) -> list[dict[str, Any]]:
     order = {
         "recency": "COALESCE(last_practiced, first_seen) DESC, id DESC",
@@ -346,7 +358,11 @@ def list_words(
     }.get(sort, "id DESC")
     # `order` is one of the literals above - an unrecognised `sort` falls back rather
     # than reaching the query.
-    rows = conn.execute(f"SELECT * FROM words ORDER BY {order} LIMIT ?", (limit,))  # noqa: S608
+    rows = conn.execute(
+        f"SELECT * FROM words WHERE (? IS NULL OR COALESCE(track, 'career') = ?) "  # noqa: S608
+        f"ORDER BY {order} LIMIT ?",
+        (track, track, limit),
+    )
     return [dict(r) for r in rows]
 
 

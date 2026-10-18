@@ -20,6 +20,7 @@ from typing import Any
 from . import db as dbmod
 from . import srs
 from .paths import (
+    MODES,
     abspath,
     brainstorm_path,
     ensure_tree,
@@ -62,11 +63,11 @@ def create_session(
     write_prompt: bool = True,
     external_uid: str | None = None,
 ) -> dict[str, Any]:
-    if mode not in ("recommended", "freeform", "interview", "worklog", "brainstorm", "journal"):
+    if mode not in MODES:
         raise WorkflowError(f"unknown mode {mode!r}")
     if mode in ("recommended", "interview") and not topic:
         raise WorkflowError(f"{mode} sessions need a topic")
-    if mode in ("worklog", "brainstorm", "journal") and not topic:
+    if mode in ("worklog", "brainstorm", "journal", "exam") and not topic:
         # Plain hyphen: the topic round-trips through Windows consoles via the CLI.
         topic = f"{mode.title()} - {dbmod.today()}"
     ensure_tree()
@@ -534,10 +535,11 @@ def record_feedback(payload: dict[str, Any], *, markdown: str | None = None) -> 
             scores.pop("target_usage", None)  # N/A (PRD 9)
 
         result["overall"] = dbmod.insert_score(conn, session_id, scores)
+        track = "exam" if session["mode"] == "exam" else None
         result["words_updated"] = _apply_reviews(
-            conn, session_id, payload.get("target_words") or []
+            conn, session_id, payload.get("target_words") or [], track
         )
-        result["words_added"] = _apply_new_words(conn, payload.get("new_words") or [])
+        result["words_added"] = _apply_new_words(conn, payload.get("new_words") or [], track)
         _apply_suggestions(conn, session["mode"], payload.get("suggestions") or [])
 
         path = feedback_path(session_id, slugify(title) if title else None)
@@ -566,7 +568,9 @@ def record_feedback(payload: dict[str, Any], *, markdown: str | None = None) -> 
     return result
 
 
-def _apply_reviews(conn, session_id: int, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _apply_reviews(
+    conn, session_id: int, entries: list[dict[str, Any]], track: str | None = None
+) -> list[dict[str, Any]]:
     """One SM-2 review per target word. Claude judged the usage; the schedule is ours."""
     updated: list[dict[str, Any]] = []
     for entry in entries:
@@ -578,7 +582,9 @@ def _apply_reviews(conn, session_id: int, entries: list[dict[str, Any]]) -> list
         quality = entry.get("quality")
         quality = int(quality) if quality is not None else srs.grade_from_usage(used, correct)
 
-        word_id = dbmod.add_word(conn, term=term, source="recommended", notes=entry.get("note"))
+        word_id = dbmod.add_word(
+            conn, term=term, source="recommended", notes=entry.get("note"), track=track
+        )
         word = conn.execute("SELECT * FROM words WHERE id = ?", (word_id,)).fetchone()
         state = srs.review(dict(word), quality)
         conn.execute(
@@ -611,7 +617,7 @@ def _apply_reviews(conn, session_id: int, entries: list[dict[str, Any]]) -> list
     return updated
 
 
-def _apply_new_words(conn, entries: list[dict[str, Any]]) -> list[str]:
+def _apply_new_words(conn, entries: list[dict[str, Any]], track: str | None = None) -> list[str]:
     added: list[str] = []
     for entry in entries:
         term = str(entry.get("term", "")).strip()
@@ -625,6 +631,7 @@ def _apply_new_words(conn, entries: list[dict[str, Any]]) -> list[str]:
             example=entry.get("example"),
             source=entry.get("source") or "recommended",
             notes=entry.get("note"),
+            track=track or entry.get("track"),
         )
         added.append(term)
     return added

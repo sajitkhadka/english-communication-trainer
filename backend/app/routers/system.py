@@ -20,7 +20,15 @@ def health() -> Any:
         pending = len(dbmod.list_sessions(conn, status="pending"))
         counts = {
             mode: len(dbmod.list_sessions(conn, mode=mode, limit=1000))
-            for mode in ("recommended", "freeform", "interview", "worklog", "brainstorm", "journal")
+            for mode in (
+                "recommended",
+                "freeform",
+                "interview",
+                "exam",
+                "worklog",
+                "brainstorm",
+                "journal",
+            )
         }
     return {
         "ok": True,

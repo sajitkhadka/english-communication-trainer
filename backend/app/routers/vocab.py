@@ -22,17 +22,23 @@ def _mark_due(word: dict[str, Any], today: str) -> dict[str, Any]:
 def list_words(
     sort: str = Query(default="recency", pattern="^(recency|frequency|mastery|alpha|due)$"),
     limit: int = Query(default=1000, ge=1, le=5000),
+    track: str | None = Query(default=None, pattern="^(career|exam)$"),
 ) -> Any:
     today = dbmod.today()
     with dbmod.cursor() as conn:
-        return [_mark_due(w, today) for w in dbmod.list_words(conn, sort=sort, limit=limit)]
+        return [
+            _mark_due(w, today) for w in dbmod.list_words(conn, sort=sort, limit=limit, track=track)
+        ]
 
 
 @router.get("/words/due", response_model=list[WordOut])
-def due_words(limit: int = Query(default=15, ge=1, le=200)) -> Any:
+def due_words(
+    limit: int = Query(default=15, ge=1, le=200),
+    track: str | None = Query(default=None, pattern="^(career|exam)$"),
+) -> Any:
     today = dbmod.today()
     with dbmod.cursor() as conn:
-        return [_mark_due(w, today) for w in dbmod.due_words(conn, limit=limit)]
+        return [_mark_due(w, today) for w in dbmod.due_words(conn, limit=limit, track=track)]
 
 
 @router.get("/words/stats")

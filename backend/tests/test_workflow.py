@@ -228,6 +228,35 @@ class TestRecordFeedback:
         assert score["target_usage"] is None
         assert score["overall"] == pytest.approx(6.16, abs=0.01)
 
+    def test_exam_session_tracks_vocabulary_but_stays_out_of_the_trend(
+        self, services, dbmod, monkeypatch
+    ):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "transcribe_on_upload", False)
+        session = services.create_session(
+            mode="exam", topic="Describe a lost wallet", target_words=["leverage", "mitigate"]
+        )
+        services.store_recording(session["id"], b"audio", suffix=".webm")
+
+        result = services.record_feedback(self.base_payload(session["id"]))
+
+        assert {w["term"] for w in result["words_updated"]} == {"leverage", "mitigate"}
+        assert result["words_added"] == ["de-risk"]
+        with dbmod.cursor() as conn:
+            assert dbmod.get_score(conn, session["id"])["target_usage"] is not None
+            assert session["id"] not in [h["session_id"] for h in dbmod.score_history(conn)]
+            tracks = {w["term"]: w["track"] for w in dbmod.list_words(conn)}
+            exam_terms = {w["term"] for w in dbmod.list_words(conn, track="exam")}
+        # A new word arrives on the exam track; a term already in the corpus keeps its own.
+        assert tracks["de-risk"] == "exam"
+        assert tracks["leverage"] == "career"
+        assert exam_terms == {"de-risk"}
+
+    def test_exam_session_without_a_topic_gets_a_dated_title(self, services):
+        session = services.create_session(mode="exam", topic=None)
+        assert session["topic"].startswith("Exam - ")
+
     def test_reprocessing_replaces_rather_than_duplicates_word_usage(
         self, services, dbmod, recorded
     ):

@@ -37,6 +37,26 @@ refuses them anyway (`record_feedback` rejects both), so processing one only was
 brief. If the queue holds nothing else, say so and point the user at the right command -
 or at `/process-queue`, which routes a mixed queue for you.
 
+## Exam sessions (`mode` = `exam`)
+
+CELPIP/IELTS practice on invented scenarios. Process it like any other session, with
+these differences:
+
+- Skip `data/learning-notes.md`; judge the answer against
+  `docs/rubric.md` and the exam task named in `category` (did it answer the prompt,
+  stay in time, hold a clear structure).
+- Keep the target-word usage section and the `target_usage` score. Add one short
+  section on how this would likely land against the exam's criteria (CELPIP: content,
+  vocabulary, listenability, task fulfilment; IELTS: fluency and coherence, lexical
+  resource, grammar, pronunciation) - an estimate, not a promise.
+- Vocabulary is tracked as usual: list every target word, and in `new_words` capture
+  strong terms the user produced or that would have lifted the answer - not everyday
+  words, but precise verbs, collocations, hedges, connectors and idioms that raise the
+  register (`"source": "user_speech"` or `"recommended"`). General English, not
+  engineering jargon. The backend tags them `exam` itself. Exam scores are left out of the Progress trend.
+- **Do not touch `data/profile.md` or `data/learning-notes.md`** (steps 7 and 8). The
+  scenario is hypothetical; nothing in it is a fact about the user.
+
 ## 2. Make sure it is transcribed
 
 If `has_transcript` is false (or `transcribe_status` is not `done`):
@@ -209,7 +229,7 @@ the session and flips the status to `processed`. It refuses to run without markd
 it reports "no feedback markdown for session <id>", the `--markdown` path was wrong; fix
 it and re-run rather than applying the payload alone.
 
-## 7. Update the profile (every run, no separate command)
+## 7. Update the profile (every run except `exam`, no separate command)
 
 Read `data/profile.md` (repo root, not `backend/data/` - commands run from `backend/`).
 It is gitignored personal state seeded from `docs/profile.example.md`; edit the live file,
@@ -234,7 +254,7 @@ The profile holds **who is speaking**. Language detail goes in step 8, not here
   and move it to *What is working* in step 8. Never let case history accumulate here.
 - If nothing new came up, leave the file alone and say so.
 
-## 8. Update the learning notes (every run)
+## 8. Update the learning notes (every run except `exam`)
 
 `data/learning-notes.md` is the durable half of the loop: `data/feedback/<id>.md` is
 per-session and never reread, this file is what carries forward. Same shape as step 7 -

@@ -84,6 +84,12 @@ export default function Vocabulary() {
                   <tr key={word.id}>
                     <td>
                       <span className="term">{word.term}</span>
+                      {word.track === "exam" && (
+                        <span className="session-row-meta" title="Exam prep vocabulary">
+                          {" "}
+                          · exam
+                        </span>
+                      )}
                       {word.notes && (
                         <div className="session-row-meta" title="Recorded misuse">
                           {word.notes}

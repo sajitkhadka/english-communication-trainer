@@ -199,8 +199,9 @@ relay is an open door to the PC's unauthenticated API.
 
 ## What the phone can and cannot start
 
-Only the four modes that need no prior setup: `freeform`, `worklog`, `brainstorm`,
-`journal`. `recommended` and `interview` carry target words chosen by
+Only the five modes that need no prior setup: `freeform`, `exam`, `worklog`, `brainstorm`,
+`journal`. An `exam` capture has no target words; type the task prompt as the topic (or
+leave it blank and it is titled "Exam - <date>"). `recommended` and `interview` carry target words chosen by
 `/generate-topic`, which is desk work — the relay rejects them at the inbox.
 
 A `journal` recorded on the commute is complete before you sit down: the backend

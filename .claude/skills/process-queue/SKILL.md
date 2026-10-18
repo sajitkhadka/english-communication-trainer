@@ -46,7 +46,7 @@ session by its `mode`.
 |---|---|
 | `worklog` | `/log-work` |
 | `brainstorm` | `/process-brainstorm` |
-| `recommended`, `freeform`, `interview` | `/process-session` |
+| `recommended`, `freeform`, `interview`, `exam` | `/process-session` |
 | `journal` | never appears - see below |
 
 `journal` sessions are finalised to `processed` the moment transcription finishes and

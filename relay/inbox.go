@@ -21,6 +21,7 @@ var ErrNotFound = errors.New("inbox item not found")
 // words attached, which is desk work by definition (ADR 0006, Consequences).
 var remoteModes = map[string]bool{
 	"freeform":   true,
+	"exam":       true,
 	"worklog":    true,
 	"brainstorm": true,
 	"journal":    true,
@@ -128,7 +129,7 @@ func (i *Inbox) Put(item Item, body io.Reader) (Item, error) {
 	}
 	if !remoteModes[item.Mode] {
 		return item, fmt.Errorf(
-			"mode %q cannot be captured remotely - use one of freeform, worklog, brainstorm, journal",
+			"mode %q cannot be captured remotely - use one of freeform, exam, worklog, brainstorm, journal",
 			item.Mode,
 		)
 	}

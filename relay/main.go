@@ -234,7 +234,7 @@ func (s *Server) handleRelayStatus(w http.ResponseWriter, r *http.Request) {
 		"digest_version":  nullString(version),
 		"digest_at":       nullString(generatedAt),
 		"digest_sessions": sessions,
-		"modes":           []string{"freeform", "worklog", "brainstorm", "journal"},
+		"modes":           []string{"freeform", "exam", "worklog", "brainstorm", "journal"},
 	})
 }
 

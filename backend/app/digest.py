@@ -106,6 +106,7 @@ def build_digest(*, feedback_horizon: int | None = None) -> dict[str, Any]:
                     "recommended",
                     "freeform",
                     "interview",
+                    "exam",
                     "worklog",
                     "brainstorm",
                     "journal",

@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS words (
   mastery              REAL    DEFAULT 0,   -- derived 0..1
   source               TEXT,                -- recommended | user_speech
   repetitions          INTEGER DEFAULT 0,   -- ADDITIVE: SM-2 successful-review streak
-  notes                TEXT                 -- ADDITIVE: misuse notes from feedback
+  notes                TEXT,                -- ADDITIVE: misuse notes from feedback
+  track                TEXT DEFAULT 'career' -- ADDITIVE: career | exam practice
 );
 
 CREATE INDEX IF NOT EXISTS idx_words_due     ON words(due_date);
@@ -30,7 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_words_mastery ON words(mastery);
 
 CREATE TABLE IF NOT EXISTS sessions (
   id              INTEGER PRIMARY KEY,
-  mode            TEXT NOT NULL,            -- recommended | freeform | interview | worklog | brainstorm | journal
+  mode            TEXT NOT NULL,            -- recommended | freeform | interview | exam | worklog | brainstorm | journal
   category        TEXT,
   topic           TEXT,
   target_words    TEXT,                     -- JSON array of terms

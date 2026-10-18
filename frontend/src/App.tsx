@@ -41,6 +41,7 @@ export default function App() {
           <NavLink to="/recommended">Recommended</NavLink>
           <NavLink to="/freeform">Free-form</NavLink>
           <NavLink to="/interview">Interview</NavLink>
+          <NavLink to="/exam">Exam prep</NavLink>
           <NavLink to="/worklog">Worklog</NavLink>
           <NavLink to="/brainstorm">Brainstorm</NavLink>
           <NavLink to="/journal">Journal</NavLink>
@@ -78,6 +79,7 @@ export default function App() {
             path="/interview"
             element={<Sessions mode="interview" onQueueChange={queue.reload} />}
           />
+          <Route path="/exam" element={<Sessions mode="exam" onQueueChange={queue.reload} />} />
           <Route
             path="/worklog"
             element={<Sessions mode="worklog" onQueueChange={queue.reload} />}

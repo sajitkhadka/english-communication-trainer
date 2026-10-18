@@ -20,7 +20,7 @@ from . import db as dbmod
 from . import services
 from .brief import brief_for_session
 from .config import settings
-from .paths import feedback_path
+from .paths import MODES, feedback_path
 
 # Fields worth spending tokens on when handing vocabulary to Claude.
 VOCAB_SLICE = (
@@ -99,7 +99,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 def cmd_vocab_due(args: argparse.Namespace) -> int:
     with dbmod.cursor() as conn:
-        rows = dbmod.due_words(conn, limit=args.limit)
+        rows = dbmod.due_words(conn, limit=args.limit, track=args.track)
         stats = dbmod.word_stats(conn)
     emit({"stats": stats, "due": [slim(r, VOCAB_SLICE) for r in rows]})
     return 0
@@ -107,7 +107,7 @@ def cmd_vocab_due(args: argparse.Namespace) -> int:
 
 def cmd_vocab_list(args: argparse.Namespace) -> int:
     with dbmod.cursor() as conn:
-        rows = dbmod.list_words(conn, sort=args.sort, limit=args.limit)
+        rows = dbmod.list_words(conn, sort=args.sort, limit=args.limit, track=args.track)
     emit([slim(r, VOCAB_SLICE) for r in rows])
     return 0
 
@@ -130,7 +130,7 @@ def cmd_vocab_stats(args: argparse.Namespace) -> int:
 
 
 def cmd_vocab_add(args: argparse.Namespace) -> int:
-    """Bulk-add vocabulary: [{"term","kind","meaning","example","source"}, ...]"""
+    """Bulk-add vocabulary: [{"term","kind","meaning","example","source","track"}, ...]"""
     payload = read_json_arg(args.json)
     items = payload if isinstance(payload, list) else payload.get("words", [])
     added: list[str] = []
@@ -147,6 +147,7 @@ def cmd_vocab_add(args: argparse.Namespace) -> int:
                 example=item.get("example"),
                 source=item.get("source") or "recommended",
                 notes=item.get("note") or item.get("notes"),
+                track=item.get("track"),
             )
             added.append(term)
     emit({"added": added, "count": len(added)})
@@ -682,12 +683,14 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     vocab_sub = vocab_p.add_subparsers(dest="action", required=True)
     p = vocab_sub.add_parser("due", help="words due for review, least mastered first")
     p.add_argument("--limit", type=int, default=15)
+    p.add_argument("--track", choices=["career", "exam"], help="only this practice track")
     p.set_defaults(func=cmd_vocab_due)
     p = vocab_sub.add_parser("list", help="the whole corpus")
     p.add_argument(
         "--sort", default="recency", choices=["recency", "frequency", "mastery", "alpha", "due"]
     )
     p.add_argument("--limit", type=int, default=1000)
+    p.add_argument("--track", choices=["career", "exam"], help="only this practice track")
     p.set_defaults(func=cmd_vocab_list)
     p = vocab_sub.add_parser(
         "gaps", help="active vs. passive: terms recognised but never reached for"
@@ -714,7 +717,7 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     p.add_argument(
         "--mode",
         required=True,
-        choices=["recommended", "freeform", "interview", "worklog", "brainstorm", "journal"],
+        choices=list(MODES),
     )
     p.add_argument("--topic", help="topic, or the interview question")
     p.add_argument("--category")
@@ -725,7 +728,7 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     p = sess_sub.add_parser("list", help="list sessions")
     p.add_argument(
         "--mode",
-        choices=["recommended", "freeform", "interview", "worklog", "brainstorm", "journal"],
+        choices=list(MODES),
     )
     p.add_argument("--status", choices=["awaiting_recording", "recorded", "pending", "processed"])
     p.add_argument("--limit", type=int, default=50)

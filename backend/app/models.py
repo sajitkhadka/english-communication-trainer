@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-Mode = Literal["recommended", "freeform", "interview", "worklog", "brainstorm", "journal"]
+Mode = Literal["recommended", "freeform", "interview", "exam", "worklog", "brainstorm", "journal"]
 Status = Literal["awaiting_recording", "recorded", "pending", "processed"]
 
 
@@ -80,6 +80,7 @@ class WordOut(BaseModel):
     source: str | None = None
     repetitions: int = 0
     notes: str | None = None
+    track: str | None = "career"
     is_due: bool = False
 
 

@@ -19,6 +19,7 @@ const UNSCORED_MODES: Mode[] = ["freeform", "worklog", "brainstorm", "journal"];
 const BLURB: Record<Mode, string> = {
   recommended: "Topics Claude generated with target vocabulary to work in.",
   freeform: "Your own topics. No target words, so target-word usage is not scored.",
+  exam: "CELPIP / IELTS style speaking tasks on hypothetical scenarios. Scored, but kept off your profile, notes and vocabulary.",
   interview: "One-way interview practice: a question, one answer, the same analysis.",
   worklog:
     "Daily work journal: talk through your day, then /log-work turns it into a structured entry. Not scored.",

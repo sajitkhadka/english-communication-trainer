@@ -2,6 +2,7 @@ export type Mode =
   | "recommended"
   | "freeform"
   | "interview"
+  | "exam"
   | "worklog"
   | "brainstorm"
   | "journal";
@@ -80,6 +81,7 @@ export interface Word {
   source: string | null;
   repetitions: number;
   notes: string | null;
+  track: "career" | "exam" | null;
   is_due: boolean;
 }
 
@@ -250,9 +252,9 @@ export interface Health {
 
 // --- the relay (docs/adr/0006-remote-capture-local-processing.md) ---
 
-/** Modes that can be captured remotely: the four that need no prior setup. The coached
- *  modes carry target words chosen by `/generate-topic`, which is desk work. */
-export type RemoteMode = "freeform" | "worklog" | "brainstorm" | "journal";
+/** Modes that can be captured remotely: the ones that need no prior setup. `recommended`
+ *  and `interview` carry target words chosen by `/generate-topic`, which is desk work. */
+export type RemoteMode = "freeform" | "exam" | "worklog" | "brainstorm" | "journal";
 
 /** `GET /api/relay/status`, answered only by the relay - the PC's API 404s it, which is
  *  exactly how the app tells which side it is being served from. */

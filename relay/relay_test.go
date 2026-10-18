@@ -177,6 +177,14 @@ func TestUploadRejectsTraversalUID(t *testing.T) {
 	}
 }
 
+func TestUploadAcceptsExamMode(t *testing.T) {
+	s := newServer(t, "http://127.0.0.1:1")
+	rec := do(t, s, uploadRequest(t, "capture-0007", "exam", "Describe a lost wallet", []byte("audio")))
+	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+		t.Fatalf("want exam capture accepted, got %d", rec.Code)
+	}
+}
+
 func TestUploadRejectsOversizedRecording(t *testing.T) {
 	s := newServer(t, "http://127.0.0.1:1")
 	rec := do(t, s, uploadRequest(t, "capture-0004", "freeform", "",

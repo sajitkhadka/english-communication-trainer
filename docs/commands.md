@@ -54,7 +54,7 @@ after recording, before the session is `processed` — `PATCH /api/sessions/{id}
 
 ## Skills
 
-### `/generate-topic [recommended|interview|freeform] [category…]`
+### `/generate-topic [recommended|interview|freeform|exam] [category…]`
 
 Creates one practice session. Reads `data/profile.md`, `data/learning-notes.md`, the
 words due for review and `ect vocab gaps`, picks 5-6 target words (a blend of due,
@@ -68,6 +68,11 @@ dormant and brand-new) for `recommended`, writes the session row and
 ```
 
 `interview` and `freeform` sessions carry no target words.
+
+`exam` (`/generate-topic exam celpip`, `exam ielts part 2`) is general-English practice on
+invented scenarios. It never reads the profile or notes, and `/process-session` leaves them
+and the Progress trend alone for it. It does carry 5-6 target words (elevated
+general-English vocabulary) that go through the normal SM-2 corpus.
 
 ### `/process-session [<session_id>] [--force]`
 

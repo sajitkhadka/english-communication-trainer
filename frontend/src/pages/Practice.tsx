@@ -15,7 +15,7 @@ import {
 import { useAsync, useCaptureQueue, useDocumentTitle, useInterval, useRelay } from "../hooks";
 import type { Mode, RemoteMode, Session } from "../types";
 
-/** The four modes that can be captured remotely - the ones that need no prior setup.
+/** The modes that can be captured remotely - the ones that need no prior setup.
  *  `recommended` and `interview` carry target words chosen by `/generate-topic`, which
  *  is desk work by definition. */
 const REMOTE_MODES: { mode: RemoteMode; title: string; blurb: string }[] = [
@@ -38,6 +38,11 @@ const REMOTE_MODES: { mode: RemoteMode; title: string; blurb: string }[] = [
     mode: "freeform",
     title: "Free-form practice",
     blurb: "Your own topic, no target words. Coached and scored.",
+  },
+  {
+    mode: "exam",
+    title: "Exam prep",
+    blurb: "A CELPIP / IELTS style task. Type the prompt as the topic. Scored, off your profile.",
   },
 ];
 

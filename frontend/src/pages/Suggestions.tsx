@@ -6,7 +6,7 @@ import { Empty, ErrorBox, MODE_LABEL } from "../components/common";
 import { useAsync, useDocumentTitle } from "../hooks";
 import type { Mode } from "../types";
 
-const MODES: Mode[] = ["recommended", "interview", "freeform"];
+const MODES: Mode[] = ["recommended", "interview", "exam", "freeform"];
 
 /** Empty until Claude writes something here (PRD 11). The request form is the other
  *  half of the queue contract: you ask for a category, the skill fulfils it. */
