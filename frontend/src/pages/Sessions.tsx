@@ -29,6 +29,13 @@ const BLURB: Record<Mode, string> = {
     "Daily life, off the record. Transcribed for your own reading only - never sent to Claude, never scored.",
 };
 
+/** The /generate-topic invocation that fills this page. */
+function generateCommand(mode: Mode): string {
+  if (mode === "interview") return "/generate-topic interview";
+  if (mode === "exam") return "/generate-topic exam celpip";
+  return "/generate-topic";
+}
+
 export default function Sessions({
   mode,
   onQueueChange,
@@ -83,6 +90,12 @@ export default function Sessions({
         <div>
           <h1>{MODE_LABEL[mode]}</h1>
           <p>{BLURB[mode]}</p>
+          {mode === "exam" && (
+            <p className="muted small">
+              Get a scenario with <code>/generate-topic exam celpip</code> or{" "}
+              <code>/generate-topic exam ielts part 2</code> in the Claude Code console.
+            </p>
+          )}
         </div>
       </div>
 
@@ -100,8 +113,7 @@ export default function Sessions({
                 </>
               ) : (
                 <>
-                  Run <code>/generate-topic {mode === "interview" ? "interview" : ""}</code> in
-                  the Claude Code console.
+                  Run <code>{generateCommand(mode)}</code> in the Claude Code console.
                 </>
               )}
             </p>
