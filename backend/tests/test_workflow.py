@@ -234,6 +234,8 @@ class TestRecordFeedback:
         from app.config import settings
 
         monkeypatch.setattr(settings, "transcribe_on_upload", False)
+        # "leverage" is already a career word; "mitigate" arrives with the exam session.
+        services.create_session(mode="recommended", topic="t", target_words=["leverage"])
         session = services.create_session(
             mode="exam", topic="Describe a lost wallet", target_words=["leverage", "mitigate"]
         )
@@ -248,10 +250,24 @@ class TestRecordFeedback:
             assert session["id"] not in [h["session_id"] for h in dbmod.score_history(conn)]
             tracks = {w["term"]: w["track"] for w in dbmod.list_words(conn)}
             exam_terms = {w["term"] for w in dbmod.list_words(conn, track="exam")}
-        # A new word arrives on the exam track; a term already in the corpus keeps its own.
-        assert tracks["de-risk"] == "exam"
-        assert tracks["leverage"] == "career"
-        assert exam_terms == {"de-risk"}
+            career_gaps = dbmod.vocabulary_gaps(conn, track="career")
+        # New words arrive on the exam track; a term already in the corpus keeps its own.
+        assert tracks == {"leverage": "career", "mitigate": "exam", "de-risk": "exam"}
+        assert exam_terms == {"mitigate", "de-risk"}
+        assert career_gaps["stats"]["total"] == 1  # `vocab gaps --track career` ignores exam words
+
+    def test_session_without_target_words_drops_target_usage(self, services, dbmod, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "transcribe_on_upload", False)
+        session = services.create_session(mode="exam", topic=None)
+        services.store_recording(session["id"], b"audio", suffix=".webm")
+        payload = self.base_payload(session["id"])
+        payload["target_words"] = []
+
+        services.record_feedback(payload)
+        with dbmod.cursor() as conn:
+            assert dbmod.get_score(conn, session["id"])["target_usage"] is None
 
     def test_exam_session_without_a_topic_gets_a_dated_title(self, services):
         session = services.create_session(mode="exam", topic=None)

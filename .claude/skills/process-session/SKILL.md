@@ -42,7 +42,8 @@ or at `/process-queue`, which routes a mixed queue for you.
 CELPIP/IELTS practice on invented scenarios. Process it like any other session, with
 these differences:
 
-- Skip `data/learning-notes.md`; judge the answer against
+- Run `ect vocab gaps ... --track exam` instead of `--track career` in step 3, and skip
+  `data/learning-notes.md`; judge the answer against
   `docs/rubric.md` and the exam task named in `category` (did it answer the prompt,
   stay in time, hold a clear structure).
 - Keep the target-word usage section and the `target_usage` score. Add one short
@@ -86,7 +87,7 @@ Then two cheap reads that make this session's feedback build on the previous one
 instead of starting over:
 
 ```bash
-uv run ect vocab gaps --limit 25 --brief
+uv run ect vocab gaps --limit 25 --brief --track career
 ```
 
 `vocab gaps` splits the corpus by whether the user actually *produces* each term:

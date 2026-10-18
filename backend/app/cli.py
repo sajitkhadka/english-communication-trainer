@@ -100,7 +100,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 def cmd_vocab_due(args: argparse.Namespace) -> int:
     with dbmod.cursor() as conn:
         rows = dbmod.due_words(conn, limit=args.limit, track=args.track)
-        stats = dbmod.word_stats(conn)
+        stats = dbmod.word_stats(conn, track=args.track)
     emit({"stats": stats, "due": [slim(r, VOCAB_SLICE) for r in rows]})
     return 0
 
@@ -115,7 +115,7 @@ def cmd_vocab_list(args: argparse.Namespace) -> int:
 def cmd_vocab_gaps(args: argparse.Namespace) -> int:
     """Active vs. passive corpus: what the user recognises but does not reach for."""
     with dbmod.cursor() as conn:
-        report = dbmod.vocabulary_gaps(conn, limit=args.limit, kind=args.kind)
+        report = dbmod.vocabulary_gaps(conn, limit=args.limit, kind=args.kind, track=args.track)
     keys = GAP_BRIEF_SLICE if args.brief else VOCAB_SLICE
     for bucket in dbmod.GAP_BUCKETS:
         report[bucket] = [slim(r, keys, always=GAP_ALWAYS) for r in report[bucket]]
@@ -139,6 +139,8 @@ def cmd_vocab_add(args: argparse.Namespace) -> int:
             term = str(item.get("term", "")).strip()
             if not term:
                 continue
+            if item.get("track") not in (None, "career", "exam"):
+                raise SystemExit(f"{term!r}: track must be career or exam, got {item['track']!r}")
             dbmod.add_word(
                 conn,
                 term=term,
@@ -697,6 +699,7 @@ def build_parser() -> argparse.ArgumentParser:  # noqa: PLR0915 - flat argparse 
     )
     p.add_argument("--limit", type=int, default=30, help="max terms per bucket")
     p.add_argument("--kind", choices=["word", "phrase", "idiom"])
+    p.add_argument("--track", choices=["career", "exam"], help="only this practice track")
     p.add_argument(
         "--brief",
         action="store_true",

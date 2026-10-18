@@ -366,15 +366,16 @@ def list_words(
     return [dict(r) for r in rows]
 
 
-def word_stats(conn: sqlite3.Connection) -> dict[str, Any]:
+def word_stats(conn: sqlite3.Connection, track: str | None = None) -> dict[str, Any]:
     row = conn.execute(
         """SELECT COUNT(*)                                        AS total,
                   SUM(CASE WHEN due_date <= ? THEN 1 ELSE 0 END)  AS due,
                   SUM(CASE WHEN mastery >= 0.8 THEN 1 ELSE 0 END) AS mastered,
                   SUM(CASE WHEN times_seen = 0 THEN 1 ELSE 0 END) AS never_practiced,
                   AVG(mastery)                                    AS avg_mastery
-             FROM words""",
-        (today(),),
+             FROM words
+            WHERE (? IS NULL OR COALESCE(track, 'career') = ?)""",
+        (today(), track, track),
     ).fetchone()
     # sqlite3.Row yields values when iterated, so .keys() is required here.
     stats = {k: (row[k] or 0) for k in row.keys()}  # noqa: SIM118
@@ -416,7 +417,11 @@ def _rate(part: int, whole: int) -> float:
 
 
 def vocabulary_gaps(
-    conn: sqlite3.Connection, *, limit: int = 30, kind: str | None = None
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 30,
+    kind: str | None = None,
+    track: str | None = None,
 ) -> dict[str, Any]:
     """Split the corpus by whether each term is active vocabulary or passive.
 
@@ -430,12 +435,16 @@ def vocabulary_gaps(
     to one that is simply new. The `by_kind` rates are usually where the finding is:
     idioms and phrases activate far more slowly than single words.
     """
+    clauses: list[str] = []
     args: list[Any] = []
-    where = ""
     if kind:
-        where = " WHERE kind = ?"
+        clauses.append("kind = ?")
         args.append(kind)
-    # `where` is built from the literal above, never from caller data; `kind` is bound.
+    if track:
+        clauses.append("COALESCE(track, 'career') = ?")
+        args.append(track)
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    # `where` is built from the literals above, never from caller data; values are bound.
     rows = [dict(r) for r in conn.execute(f"SELECT * FROM words{where}", args)]  # noqa: S608
 
     buckets: dict[str, list[dict[str, Any]]] = {

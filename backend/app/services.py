@@ -95,7 +95,12 @@ def create_session(
             )
             # Register target words so they exist in the corpus before review scheduling.
             for term in target_words or []:
-                dbmod.add_word(conn, term=term, source="recommended")
+                dbmod.add_word(
+                    conn,
+                    term=term,
+                    source="recommended",
+                    track="exam" if mode == "exam" else None,
+                )
             session = dbmod.get_session(conn, session_id)
     except sqlite3.IntegrityError:
         # The check above lost a race with a concurrent drain of the same uid. The
@@ -531,8 +536,11 @@ def record_feedback(payload: dict[str, Any], *, markdown: str | None = None) -> 
                 f"session {session_id} is a {session['mode']} session - apply it with "
                 f"{other}, not `ect feedback apply`"
             )
-        if session["mode"] == "freeform":
-            scores.pop("target_usage", None)  # N/A (PRD 9)
+        if session["mode"] == "freeform" or not session.get("target_words"):
+            # N/A (PRD 9): nothing was asked of the user, so there is nothing to score.
+            # Structural rather than per-mode, so a phone-captured exam session (no
+            # target words) renormalises the same way a free-form one does.
+            scores.pop("target_usage", None)
 
         result["overall"] = dbmod.insert_score(conn, session_id, scores)
         track = "exam" if session["mode"] == "exam" else None

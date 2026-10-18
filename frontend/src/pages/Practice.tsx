@@ -42,7 +42,7 @@ const REMOTE_MODES: { mode: RemoteMode; title: string; blurb: string }[] = [
   {
     mode: "exam",
     title: "Exam prep",
-    blurb: "A CELPIP / IELTS style task. Type the prompt as the topic. Scored, off your profile.",
+    blurb: "A CELPIP / IELTS style task. Type the prompt as the topic. Scored, kept off your profile.",
   },
 ];
 
@@ -198,13 +198,19 @@ export default function Practice({ onQueueChange }: { onQueueChange: () => void 
                 <h2>{REMOTE_MODES.find((m) => m.mode === capturing)?.title}</h2>
                 <button onClick={() => setCapturing(null)}>Cancel</button>
               </div>
-              {capturing === "freeform" && (
+              {(capturing === "freeform" || capturing === "exam") && (
                 <div className="field">
-                  <label htmlFor="capture-topic">Topic (optional)</label>
+                  <label htmlFor="capture-topic">
+                    {capturing === "exam" ? "Task prompt" : "Topic (optional)"}
+                  </label>
                   <input
                     id="capture-topic"
                     value={captureTopic}
-                    placeholder="e.g. Explain our deployment process"
+                    placeholder={
+                      capturing === "exam"
+                        ? "e.g. A friend asks your advice on moving cities"
+                        : "e.g. Explain our deployment process"
+                    }
                     onChange={(event) => setCaptureTopic(event.target.value)}
                   />
                 </div>
